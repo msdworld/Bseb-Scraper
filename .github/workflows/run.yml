@@ -16,3 +16,10 @@ jobs:
 
       - run: npm install
       - run: node script.js
+- name: Commit JSON
+  run: |
+    git config --global user.name "bot"
+    git config --global user.email "bot@example.com"
+    git add .
+    git commit -m "update data" || echo "no changes"
+    git push
