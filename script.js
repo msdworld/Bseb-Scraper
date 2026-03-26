@@ -89,6 +89,17 @@ function extractResultData(html) {
     console.log("📌 GET Status:", getRes.status);
 
     const html1 = getRes.data;
+    console.log("\n=========== SEARCHING CAPTCHA SCRIPT ===========\n");
+
+const captchaMatches = html1.match(/.{0,120}(captcha|generatedCaptcha).{0,200}/gi);
+
+if (captchaMatches && captchaMatches.length) {
+  captchaMatches.forEach((line, i) => {
+    console.log(`\n[${i + 1}] ${line}\n`);
+  });
+} else {
+  console.log("❌ No captcha-related text found in raw HTML");
+}
     const $ = cheerio.load(html1);
 
     // Collect cookies
