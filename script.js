@@ -1,195 +1,215 @@
-const axios = require("axios");
-const cheerio = require("cheerio");
+const puppeteer = require("puppeteer-core");
 const fs = require("fs");
 
-const BASE_URL = "http://interbiharboard.com/Default.html";
-const POST_URL = "http://interbiharboard.com/Default.html";
-
-const START_ROLL_CODE = 11001;
-const END_ROLL_CODE = 99999;
-
-const TEST_ROLL_NUMBERS = [
-  "26010011",
-  "26010023",
-  "26010035",
-  "26010047"
-];
-
-const OUTPUT_FILE = "bseb-12th-college-list-2026.json";
-const PROGRESS_FILE = "progress.txt";
-
-// =========================
-// LOAD OLD DATA
-// =========================
-let savedData = {};
-if (fs.existsSync(OUTPUT_FILE)) {
+(async function () {
   try {
-    savedData = JSON.parse(fs.readFileSync(OUTPUT_FILE, "utf8"));
-  } catch {
-    savedData = {};
-  }
-}
+    // =========================
+    // SETTINGS
+    // =========================
+    const START_ROLL_CODE = 11001;
+    const END_ROLL_CODE = 99999;
 
-let currentRollCode = START_ROLL_CODE;
-if (fs.existsSync(PROGRESS_FILE)) {
-  const savedProgress = parseInt(fs.readFileSync(PROGRESS_FILE, "utf8").trim(), 10);
-  if (!isNaN(savedProgress) && savedProgress >= START_ROLL_CODE && savedProgress <= END_ROLL_CODE) {
-    currentRollCode = savedProgress;
-  }
-}
+    const TEST_ROLL_NUMBERS = [
+      "26010011",
+      "26010023",
+      "26010035",
+      "26010047"
+    ];
 
-console.log(`🚀 Starting from roll code: ${currentRollCode}`);
+    const OUTPUT_FILE = "bseb-12th-college-list-2026.json";
+    const PROGRESS_FILE = "progress.txt";
 
-// =========================
-// SESSION / COOKIES
-// =========================
-let cookieJar = "";
-
-function updateCookies(setCookieHeaders = []) {
-  const cookies = setCookieHeaders.map(c => c.split(";")[0]);
-  if (cookies.length) {
-    cookieJar = cookies.join("; ");
-  }
-}
-
-async function getFormData() {
-  const res = await axios.get(BASE_URL, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      "Accept": "text/html,application/xhtml+xml"
-    },
-    timeout: 15000,
-    validateStatus: () => true
-  });
-
-  updateCookies(res.headers["set-cookie"] || []);
-
-  const $ = cheerio.load(res.data);
-
-  const viewState = $("#__VIEWSTATE").val() || "";
-  const eventValidation = $("#__EVENTVALIDATION").val() || "";
-  const viewStateGenerator = $("#__VIEWSTATEGENERATOR").val() || "";
-
-  // captcha extraction
-  let captchaValue = $("#generatedCaptcha").attr("data-value") || "";
-  if (!captchaValue) {
-    captchaValue = $("#generatedCaptcha").text().trim();
-  }
-
-  return {
-    viewState,
-    eventValidation,
-    viewStateGenerator,
-    captchaValue
-  };
-}
-
-async function checkStudent(rollCode, rollNumber) {
-  try {
-    const formData = await getFormData();
-
-    if (!formData.viewState || !formData.eventValidation) {
-      return { error: true, message: "Hidden ASP.NET fields not found" };
+    // =========================
+    // LOAD OLD DATA
+    // =========================
+    let savedData = {};
+    if (fs.existsSync(OUTPUT_FILE)) {
+      try {
+        savedData = JSON.parse(fs.readFileSync(OUTPUT_FILE, "utf8"));
+      } catch {
+        savedData = {};
+      }
     }
 
-    const payload = new URLSearchParams();
-    payload.append("__VIEWSTATE", formData.viewState);
-    payload.append("__VIEWSTATEGENERATOR", formData.viewStateGenerator);
-    payload.append("__EVENTVALIDATION", formData.eventValidation);
+    let currentRollCode = START_ROLL_CODE;
+    if (fs.existsSync(PROGRESS_FILE)) {
+      const savedProgress = parseInt(fs.readFileSync(PROGRESS_FILE, "utf8").trim(), 10);
+      if (!isNaN(savedProgress) && savedProgress >= START_ROLL_CODE && savedProgress <= END_ROLL_CODE) {
+        currentRollCode = savedProgress;
+      }
+    }
 
-    payload.append("mobile", String(rollCode));
-    payload.append("password", String(rollNumber));
-    payload.append("captchaInput", formData.captchaValue);
-    payload.append("btn_login", "Submit");
+    console.log(`🚀 STARTING FROM: ${currentRollCode}`);
 
-    const res = await axios.post(POST_URL, payload.toString(), {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Cookie": cookieJar,
-        "Referer": BASE_URL,
-        "Origin": "http://interbiharboard.com"
-      },
-      timeout: 15000,
-      maxRedirects: 5,
-      validateStatus: () => true
+    // =========================
+    // CHROME PATH
+    // =========================
+    const chromePath = fs.existsSync("/usr/bin/chromium-browser")
+      ? "/usr/bin/chromium-browser"
+      : "/usr/bin/chromium";
+
+    console.log(`🌐 USING CHROMIUM: ${chromePath}`);
+
+    // =========================
+    // BROWSER
+    // =========================
+    const browser = await puppeteer.launch({
+      executablePath: chromePath,
+      headless: "new",
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu"
+      ]
     });
 
-    const html = res.data;
-    const text = String(html).toLowerCase();
+    const page = await browser.newPage();
+    await page.setDefaultNavigationTimeout(60000);
 
-    if (
-      text.includes("invalid") ||
-      text.includes("roll code not found") ||
-      text.includes("not found") ||
-      text.includes("please enter valid")
-    ) {
-      return { found: false };
+    async function openForm() {
+      await page.goto("http://interbiharboard.com/Default.html", {
+        waitUntil: "domcontentloaded",
+        timeout: 60000
+      });
+
+      await page.waitForSelector("#mobile", { timeout: 30000 });
     }
 
-    const $ = cheerio.load(html);
+    async function fillAndSubmit(rollCode, rollNumber) {
+      try {
+        await page.waitForSelector("#mobile", { timeout: 15000 });
 
-    let schoolName = null;
+        await page.$eval("#mobile", el => el.value = "");
+        await page.type("#mobile", String(rollCode), { delay: 1 });
 
-    $("table tr").each((_, row) => {
-      const tds = $(row).find("td");
-      if (tds.length === 2) {
-        const key = $(tds[0]).text().replace(/\s+/g, " ").trim().toLowerCase();
-        const value = $(tds[1]).text().replace(/\s+/g, " ").trim();
+        await page.$eval("#password", el => el.value = "");
+        await page.type("#password", String(rollNumber), { delay: 1 });
 
-        if (key.includes("school") || key.includes("college")) {
-          schoolName = value;
+        await page.evaluate(() => {
+          const capEl = document.getElementById("generatedCaptcha");
+          const inputEl = document.getElementById("captchaInput");
+
+          if (capEl && inputEl) {
+            const capValue =
+              capEl.dataset.value ||
+              capEl.getAttribute("data-value") ||
+              capEl.innerText.trim();
+
+            inputEl.value = capValue;
+          }
+        });
+
+        await Promise.allSettled([
+          page.click("#btn_login")
+        ]);
+
+        await new Promise(resolve => setTimeout(resolve, 2500));
+
+        const pageText = await page.evaluate(() => document.body.innerText.toLowerCase());
+
+        if (
+          pageText.includes("invalid") ||
+          pageText.includes("roll code not found") ||
+          pageText.includes("please enter valid") ||
+          pageText.includes("not found")
+        ) {
+          return { found: false };
         }
-      }
-    });
 
-    if (schoolName && schoolName.length > 2) {
-      return {
-        found: true,
-        schoolName
-      };
+        const data = await page.evaluate(() => {
+          function clean(txt) {
+            return (txt || "").replace(/\s+/g, " ").trim();
+          }
+
+          let schoolName = null;
+          const rows = Array.from(document.querySelectorAll("table tr"));
+
+          for (const row of rows) {
+            const cells = row.querySelectorAll("td");
+            if (cells.length === 2) {
+              const key = clean(cells[0].innerText).toLowerCase();
+              const value = clean(cells[1].innerText);
+
+              if (key.includes("school") || key.includes("college")) {
+                schoolName = value;
+              }
+            }
+          }
+
+          return { schoolName };
+        });
+
+        if (data.schoolName && data.schoolName.length > 2) {
+          return {
+            found: true,
+            schoolName: data.schoolName
+          };
+        }
+
+        return { found: false };
+      } catch (err) {
+        return {
+          error: true,
+          message: err.message
+        };
+      }
     }
 
-    return { found: false };
+    await openForm();
+
+    // =========================
+    // MAIN LOOP
+    // =========================
+    for (let rollCode = currentRollCode; rollCode <= END_ROLL_CODE; rollCode++) {
+      console.log(`🔍 CHECKING: ${rollCode}`);
+      fs.writeFileSync(PROGRESS_FILE, String(rollCode));
+
+      let validFound = false;
+
+      for (const rollNumber of TEST_ROLL_NUMBERS) {
+        const result = await fillAndSubmit(rollCode, rollNumber);
+
+        if (result.error) {
+          console.log(`⚠️ ERROR ${rollCode}-${rollNumber}: ${result.message}`);
+          try {
+            await openForm();
+          } catch {}
+          continue;
+        }
+
+        if (result.found) {
+          savedData[String(rollCode)] = result.schoolName;
+          fs.writeFileSync(OUTPUT_FILE, JSON.stringify(savedData, null, 2));
+
+          console.log(`✅ SAVED: ${rollCode} - ${result.schoolName}`);
+          validFound = true;
+          break;
+        }
+
+        // reopen form for next roll number
+        try {
+          await openForm();
+        } catch {}
+      }
+
+      if (validFound) {
+        try {
+          await openForm();
+        } catch {}
+      }
+
+      if (rollCode % 100 === 0) {
+        console.log("⏳ SHORT COOL DOWN...");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
+    console.log("🎉 DONE");
+    await browser.close();
+
   } catch (err) {
-    return { error: true, message: err.message };
+    console.error("❌ FATAL ERROR:", err.message);
+    process.exit(1);
   }
-}
-
-// =========================
-// MAIN LOOP
-// =========================
-(async () => {
-  for (let rollCode = currentRollCode; rollCode <= END_ROLL_CODE; rollCode++) {
-    console.log(`🔍 Checking: ${rollCode}`);
-    fs.writeFileSync(PROGRESS_FILE, String(rollCode));
-
-    let found = false;
-
-    for (const rollNumber of TEST_ROLL_NUMBERS) {
-      const result = await checkStudent(rollCode, rollNumber);
-
-      if (result.error) {
-        console.log(`⚠️ Error ${rollCode}-${rollNumber}: ${result.message}`);
-        continue;
-      }
-
-      if (result.found) {
-        savedData[String(rollCode)] = result.schoolName;
-        fs.writeFileSync(OUTPUT_FILE, JSON.stringify(savedData, null, 2));
-
-        console.log(`✅ SAVED: ${rollCode} - ${result.schoolName}`);
-        found = true;
-        break;
-      }
-    }
-
-    // optional small pause every 100 checks
-    if (rollCode % 100 === 0) {
-      console.log("⏳ Cooldown 2 sec...");
-      await new Promise(r => setTimeout(r, 2000));
-    }
-  }
-
-  console.log("🎉 DONE");
 })();
