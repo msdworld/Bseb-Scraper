@@ -1,4 +1,4 @@
-name: BSEB Valid Roll Code Finder
+name: BSEB Full Result Scraper
 
 on:
   workflow_dispatch:
@@ -31,8 +31,8 @@ jobs:
         run: |
           echo "===== FILE LIST ====="
           ls -la
-          echo "===== JSON FILE ====="
-          cat bseb-12th-college-list-2026.json || echo "JSON file not found"
+          echo "===== FULL RESULT JSON ====="
+          cat bseb-12th-full-result-2026.json || echo "Full result JSON not found"
           echo "===== PROGRESS FILE ====="
           cat progress.txt || echo "Progress file not found"
 
@@ -40,14 +40,14 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add bseb-12th-college-list-2026.json progress.txt
-          git commit -m "Update valid roll code data" || echo "No changes to commit"
+          git add bseb-12th-full-result-2026.json progress.txt
+          git commit -m "Update BSEB full result data" || echo "No changes to commit"
           git push
 
       - name: Upload Result Files
         uses: actions/upload-artifact@v4
         with:
-          name: bseb-valid-roll-codes
+          name: bseb-full-result-data
           path: |
-            bseb-12th-college-list-2026.json
+            bseb-12th-full-result-2026.json
             progress.txt
