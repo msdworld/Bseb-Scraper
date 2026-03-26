@@ -42,6 +42,10 @@ function getHidden($, id) {
   return clean($(`#${id}`).val() || "");
 }
 
+function generateCaptcha() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
 function extractResultData(html) {
   const $ = cheerio.load(html);
 
@@ -89,17 +93,6 @@ function extractResultData(html) {
     console.log("📌 GET Status:", getRes.status);
 
     const html1 = getRes.data;
-    console.log("\n=========== SEARCHING CAPTCHA SCRIPT ===========\n");
-
-const captchaMatches = html1.match(/.{0,120}(captcha|generatedCaptcha).{0,200}/gi);
-
-if (captchaMatches && captchaMatches.length) {
-  captchaMatches.forEach((line, i) => {
-    console.log(`\n[${i + 1}] ${line}\n`);
-  });
-} else {
-  console.log("❌ No captcha-related text found in raw HTML");
-}
     const $ = cheerio.load(html1);
 
     // Collect cookies
@@ -126,26 +119,10 @@ if (captchaMatches && captchaMatches.length) {
     }
 
     // --------------------------------
-    // 2. EXTRACT CAPTCHA VALUE
+    // 2. GENERATE CAPTCHA (client-side only)
     // --------------------------------
-    let captchaValue = "";
-
-    const captchaEl = $("#generatedCaptcha");
-    if (captchaEl.length) {
-      captchaValue =
-        clean(captchaEl.attr("data-value")) ||
-        clean(captchaEl.data("value")) ||
-        clean(captchaEl.text());
-    }
-
-    console.log("🔐 Captcha Value:", captchaValue || "(not found)");
-
-    if (!captchaValue) {
-      console.log("❌ Could not extract captcha value.");
-      fs.writeFileSync("debug-form.html", html1);
-      console.log("📝 Saved debug-form.html");
-      return;
-    }
+    const captchaValue = generateCaptcha();
+    console.log("🔐 Using Captcha:", captchaValue);
 
     // --------------------------------
     // 3. BUILD POST PAYLOAD
