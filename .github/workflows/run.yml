@@ -28,6 +28,7 @@ jobs:
         run: node script.js
 
       - name: Show Saved Files
+        if: always()
         run: |
           echo "===== FILE LIST ====="
           ls -la
@@ -37,14 +38,17 @@ jobs:
           cat progress.txt || echo "Progress file not found"
 
       - name: Commit and Push Results
+        if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add bseb-12th-full-result-2026.json progress.txt
           git commit -m "Update BSEB full result data" || echo "No changes to commit"
+          git pull --rebase origin main || true
           git push
 
       - name: Upload Result Files
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bseb-full-result-data
