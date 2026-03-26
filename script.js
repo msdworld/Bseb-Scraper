@@ -8,15 +8,25 @@ const fs = require("fs");
 const BASE_URL = "https://interbiharboard.com/Default.html";
 const POST_URL = "https://interbiharboard.com/Result.aspx";
 
-const rollCode = "42104";
-const rollNumber = "26010031";
+const START_ROLL_CODE = 11001;
+const END_ROLL_CODE = 99999;
+
+const TEST_ROLL_NUMBERS = [
+  "26010011",
+  "26010023",
+  "26010035",
+  "26010047"
+];
+
+const OUTPUT_FILE = "bseb-12th-college-list-2026.json";
+const PROGRESS_FILE = "progress.txt";
 
 // ===============================
-// AXIOS INSTANCE
+// AXIOS
 // ===============================
 const client = axios.create({
-  timeout: 30000,
-  maxRedirects: 5,
+  timeout: 15000,
+  maxRedirects: 3,
   validateStatus: () => true,
   headers: {
     "User-Agent":
@@ -44,6 +54,29 @@ function getHidden($, id) {
 
 function generateCaptcha() {
   return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function loadJson(file, fallback = {}) {
+  if (!fs.existsSync(file)) return fallback;
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function saveJson(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+}
+
+function loadProgress() {
+  if (!fs.existsSync(PROGRESS_FILE)) return START_ROLL_CODE;
+  const n = parseInt(fs.readFileSync(PROGRESS_FILE, "utf8").trim(), 10);
+  return Number.isFinite(n) ? n : START_ROLL_CODE;
+}
+
+function saveProgress(rollCode) {
+  fs.writeFileSync(PROGRESS_FILE, String(rollCode));
 }
 
 function extractResultData(html) {
@@ -79,106 +112,110 @@ function extractResultData(html) {
 }
 
 // ===============================
+// GET FORM TOKENS
+// ===============================
+async function getFormSession() {
+  const getRes = await client.get(BASE_URL);
+
+  const html = getRes.data;
+  const $ = cheerio.load(html);
+
+  const rawCookies = getRes.headers["set-cookie"] || [];
+  const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
+
+  const VIEWSTATE = getHidden($, "__VIEWSTATE");
+  const VIEWSTATEGENERATOR = getHidden($, "__VIEWSTATEGENERATOR");
+  const EVENTVALIDATION = getHidden($, "__EVENTVALIDATION");
+
+  if (!VIEWSTATE || !EVENTVALIDATION) {
+    throw new Error("Hidden fields missing");
+  }
+
+  return {
+    cookieHeader,
+    VIEWSTATE,
+    VIEWSTATEGENERATOR,
+    EVENTVALIDATION
+  };
+}
+
+// ===============================
+// CHECK ONE STUDENT
+// ===============================
+async function checkStudent(session, rollCode, rollNumber) {
+  const payload = new URLSearchParams();
+  payload.append("__EVENTTARGET", "");
+  payload.append("__EVENTARGUMENT", "");
+  payload.append("__VIEWSTATE", session.VIEWSTATE);
+  payload.append("__VIEWSTATEGENERATOR", session.VIEWSTATEGENERATOR);
+  payload.append("__EVENTVALIDATION", session.EVENTVALIDATION);
+  payload.append("mobile", String(rollCode));
+  payload.append("password", String(rollNumber));
+  payload.append("captchaInput", generateCaptcha());
+  payload.append("btn_login", "View Result");
+
+  const postRes = await client.post(POST_URL, payload.toString(), {
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Cookie": session.cookieHeader,
+      "Referer": BASE_URL,
+      "Origin": "https://interbiharboard.com"
+    }
+  });
+
+  const result = extractResultData(postRes.data);
+
+  if (result.schoolName && result.rollCode && result.rollNo) {
+    return result;
+  }
+
+  return null;
+}
+
+// ===============================
 // MAIN
 // ===============================
 (async () => {
-  try {
-    console.log("🚀 STEP 1: Fetching form page...");
+  let validRollCodes = loadJson(OUTPUT_FILE, {});
+  let current = loadProgress();
 
-    // --------------------------------
-    // 1. GET DEFAULT PAGE
-    // --------------------------------
-    const getRes = await client.get(BASE_URL);
+  console.log(`🚀 Starting from roll code: ${current}`);
 
-    console.log("📌 GET Status:", getRes.status);
+  for (let rollCode = current; rollCode <= END_ROLL_CODE; rollCode++) {
+    console.log(`Checking: ${rollCode}`);
 
-    const html1 = getRes.data;
-    const $ = cheerio.load(html1);
-
-    // Collect cookies
-    const rawCookies = getRes.headers["set-cookie"] || [];
-    const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
-
-    // Extract ASP.NET hidden fields
-    const VIEWSTATE = getHidden($, "__VIEWSTATE");
-    const VIEWSTATEGENERATOR = getHidden($, "__VIEWSTATEGENERATOR");
-    const EVENTVALIDATION = getHidden($, "__EVENTVALIDATION");
-
-    console.log("✅ Hidden fields:");
-    console.log({
-      VIEWSTATE: !!VIEWSTATE,
-      VIEWSTATEGENERATOR: !!VIEWSTATEGENERATOR,
-      EVENTVALIDATION: !!EVENTVALIDATION
-    });
-
-    if (!VIEWSTATE || !EVENTVALIDATION) {
-      console.log("❌ Failed to extract hidden fields.");
-      fs.writeFileSync("debug-form.html", html1);
-      console.log("📝 Saved debug-form.html");
-      return;
+    // Already saved? skip
+    if (validRollCodes[String(rollCode)]) {
+      saveProgress(rollCode + 1);
+      continue;
     }
 
-    // --------------------------------
-    // 2. GENERATE CAPTCHA (client-side only)
-    // --------------------------------
-    const captchaValue = generateCaptcha();
-    console.log("🔐 Using Captcha:", captchaValue);
+    let found = false;
 
-    // --------------------------------
-    // 3. BUILD POST PAYLOAD
-    // --------------------------------
-    const payload = new URLSearchParams();
-    payload.append("__EVENTTARGET", "");
-    payload.append("__EVENTARGUMENT", "");
-    payload.append("__VIEWSTATE", VIEWSTATE);
-    payload.append("__VIEWSTATEGENERATOR", VIEWSTATEGENERATOR);
-    payload.append("__EVENTVALIDATION", EVENTVALIDATION);
-    payload.append("mobile", rollCode);
-    payload.append("password", rollNumber);
-    payload.append("captchaInput", captchaValue);
-    payload.append("btn_login", "View Result");
+    for (const rollNumber of TEST_ROLL_NUMBERS) {
+      try {
+        const session = await getFormSession();
+        const result = await checkStudent(session, rollCode, rollNumber);
 
-    console.log("🚀 STEP 2: Sending POST request...");
+        if (result) {
+          validRollCodes[String(rollCode)] = result.schoolName;
+          saveJson(OUTPUT_FILE, validRollCodes);
 
-    // --------------------------------
-    // 4. POST RESULT REQUEST
-    // --------------------------------
-    const postRes = await client.post(POST_URL, payload.toString(), {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Cookie": cookieHeader,
-        "Referer": BASE_URL,
-        "Origin": "https://interbiharboard.com"
+          console.log(`✅ Saved: ${rollCode} - ${result.schoolName}`);
+          found = true;
+          break;
+        }
+      } catch (err) {
+        console.log(`⚠ Error on ${rollCode} / ${rollNumber}: ${err.message}`);
       }
-    });
-
-    console.log("📌 POST Status:", postRes.status);
-    console.log("📌 Final URL:", postRes.request?.res?.responseUrl || POST_URL);
-
-    const html2 = postRes.data;
-    fs.writeFileSync("debug-result.html", html2);
-
-    // --------------------------------
-    // 5. EXTRACT RESULT
-    // --------------------------------
-    const result = extractResultData(html2);
-
-    console.log("\n=========== RESULT JSON ===========\n");
-    console.log(JSON.stringify(result, null, 2));
-
-    // --------------------------------
-    // 6. VALID / INVALID
-    // --------------------------------
-    if (result.schoolName && result.rollCode && result.rollNo) {
-      console.log("\n✅ DIRECT POST WORKED!");
-    } else {
-      console.log("\n❌ DIRECT POST DID NOT RETURN VALID RESULT");
-      console.log("📝 Check debug-result.html");
     }
 
-  } catch (err) {
-    console.error("❌ ERROR:", err.message);
-    if (err.code) console.error("📌 ERROR CODE:", err.code);
-    if (err.response) console.error("📌 RESPONSE STATUS:", err.response.status);
+    if (!found) {
+      console.log(`❌ Not found: ${rollCode}`);
+    }
+
+    saveProgress(rollCode + 1);
   }
+
+  console.log("🎉 Done! All roll codes checked.");
 })();
