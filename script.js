@@ -1,7 +1,7 @@
 const puppeteer = require("puppeteer-core");
 const fs = require("fs");
 
-(async function () {
+(async () => {
   try {
     // =========================
     // SETTINGS
@@ -20,13 +20,13 @@ const fs = require("fs");
     const PROGRESS_FILE = "progress.txt";
 
     // =========================
-    // LOAD OLD DATA
+    // LOAD SAVED DATA
     // =========================
     let savedData = {};
     if (fs.existsSync(OUTPUT_FILE)) {
       try {
         savedData = JSON.parse(fs.readFileSync(OUTPUT_FILE, "utf8"));
-      } catch {
+      } catch (e) {
         savedData = {};
       }
     }
@@ -34,7 +34,11 @@ const fs = require("fs");
     let currentRollCode = START_ROLL_CODE;
     if (fs.existsSync(PROGRESS_FILE)) {
       const savedProgress = parseInt(fs.readFileSync(PROGRESS_FILE, "utf8").trim(), 10);
-      if (!isNaN(savedProgress) && savedProgress >= START_ROLL_CODE && savedProgress <= END_ROLL_CODE) {
+      if (
+        !isNaN(savedProgress) &&
+        savedProgress >= START_ROLL_CODE &&
+        savedProgress <= END_ROLL_CODE
+      ) {
         currentRollCode = savedProgress;
       }
     }
@@ -42,7 +46,7 @@ const fs = require("fs");
     console.log(`🚀 STARTING FROM: ${currentRollCode}`);
 
     // =========================
-    // CHROME PATH
+    // CHROMIUM PATH
     // =========================
     const chromePath = fs.existsSync("/usr/bin/chromium-browser")
       ? "/usr/bin/chromium-browser"
@@ -67,6 +71,20 @@ const fs = require("fs");
     const page = await browser.newPage();
     await page.setDefaultNavigationTimeout(60000);
 
+    // Reduce unnecessary resource load to speed up a bit
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      const type = req.resourceType();
+      if (["image", "font", "media", "stylesheet"].includes(type)) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
+    // =========================
+    // OPEN FORM
+    // =========================
     async function openForm() {
       await page.goto("http://interbiharboard.com/Default.html", {
         waitUntil: "domcontentloaded",
@@ -76,16 +94,21 @@ const fs = require("fs");
       await page.waitForSelector("#mobile", { timeout: 30000 });
     }
 
+    // =========================
+    // SUBMIT ONE CHECK
+    // =========================
     async function fillAndSubmit(rollCode, rollNumber) {
       try {
         await page.waitForSelector("#mobile", { timeout: 15000 });
 
-        await page.$eval("#mobile", el => el.value = "");
-        await page.type("#mobile", String(rollCode), { delay: 1 });
+        // Clear inputs properly
+        await page.$eval("#mobile", el => { el.value = ""; });
+        await page.$eval("#password", el => { el.value = ""; });
 
-        await page.$eval("#password", el => el.value = "");
+        await page.type("#mobile", String(rollCode), { delay: 1 });
         await page.type("#password", String(rollNumber), { delay: 1 });
 
+        // Auto fill captcha from page
         await page.evaluate(() => {
           const capEl = document.getElementById("generatedCaptcha");
           const inputEl = document.getElementById("captchaInput");
@@ -100,11 +123,17 @@ const fs = require("fs");
           }
         });
 
+        // Submit
         await page.click("#btn_login");
+
+        // Wait a little for postback/result page
         await new Promise(resolve => setTimeout(resolve, 2500));
 
-        const pageText = await page.evaluate(() => document.body.innerText.toLowerCase());
+        const pageText = await page.evaluate(() =>
+          document.body.innerText.toLowerCase()
+        );
 
+        // Invalid checks
         if (
           pageText.includes("invalid") ||
           pageText.includes("roll code not found") ||
@@ -114,6 +143,7 @@ const fs = require("fs");
           return { found: false };
         }
 
+        // Extract school/college name from result page
         const data = await page.evaluate(() => {
           function clean(txt) {
             return (txt || "").replace(/\s+/g, " ").trim();
@@ -153,11 +183,11 @@ const fs = require("fs");
       }
     }
 
+    // =========================
+    // START
+    // =========================
     await openForm();
 
-    // =========================
-    // MAIN LOOP
-    // =========================
     for (let rollCode = currentRollCode; rollCode <= END_ROLL_CODE; rollCode++) {
       console.log(`🔍 CHECKING: ${rollCode}`);
       fs.writeFileSync(PROGRESS_FILE, String(rollCode));
@@ -171,7 +201,7 @@ const fs = require("fs");
           console.log(`⚠️ ERROR ${rollCode}-${rollNumber}: ${result.message}`);
           try {
             await openForm();
-          } catch {}
+          } catch (e) {}
           continue;
         }
 
@@ -184,15 +214,16 @@ const fs = require("fs");
           break;
         }
 
+        // reopen fresh form for next roll number
         try {
           await openForm();
-        } catch {}
+        } catch (e) {}
       }
 
       if (validFound) {
         try {
           await openForm();
-        } catch {}
+        } catch (e) {}
       }
 
       if (rollCode % 100 === 0) {
@@ -203,5 +234,8 @@ const fs = require("fs");
 
     console.log("🎉 DONE");
     await browser.close();
-
-  } catch (err)
+  } catch (err) {
+    console.error("❌ FATAL ERROR:", err.message);
+    process.exit(1);
+  }
+})();
