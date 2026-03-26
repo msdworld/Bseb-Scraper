@@ -69,7 +69,7 @@ function loadJSON(file, fallback = {}) {
 }
 
 function saveJSON(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  fs.writeFileSync(file, JSON.stringify(data));
 }
 
 function saveProgress(currentRollCode, currentRollNo) {
