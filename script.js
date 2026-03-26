@@ -21,12 +21,17 @@ const TEST_ROLL_NUMBERS = [
 const OUTPUT_FILE = "bseb-12th-college-list-2026.json";
 const PROGRESS_FILE = "progress.txt";
 
+// Speed controls
+const CONCURRENCY = 5;       // 5 parallel requests
+const BATCH_SIZE = 50;       // refresh token after every 50 roll codes
+const REQUEST_TIMEOUT = 15000;
+
 // ===============================
-// AXIOS
+// AXIOS CLIENT
 // ===============================
 const client = axios.create({
-  timeout: 15000,
-  maxRedirects: 3,
+  timeout: REQUEST_TIMEOUT,
+  maxRedirects: 5,
   validateStatus: () => true,
   headers: {
     "User-Agent":
@@ -56,7 +61,7 @@ function generateCaptcha() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-function loadJson(file, fallback = {}) {
+function loadJSON(file, fallback = {}) {
   if (!fs.existsSync(file)) return fallback;
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -65,14 +70,14 @@ function loadJson(file, fallback = {}) {
   }
 }
 
-function saveJson(file, data) {
+function saveJSON(file, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
 function loadProgress() {
   if (!fs.existsSync(PROGRESS_FILE)) return START_ROLL_CODE;
-  const n = parseInt(fs.readFileSync(PROGRESS_FILE, "utf8").trim(), 10);
-  return Number.isFinite(n) ? n : START_ROLL_CODE;
+  const num = parseInt(fs.readFileSync(PROGRESS_FILE, "utf8").trim(), 10);
+  return isNaN(num) ? START_ROLL_CODE : num;
 }
 
 function saveProgress(rollCode) {
@@ -84,8 +89,6 @@ function extractResultData(html) {
 
   const data = {
     studentName: null,
-    fatherName: null,
-    motherName: null,
     schoolName: null,
     rollCode: null,
     rollNo: null,
@@ -99,8 +102,6 @@ function extractResultData(html) {
       const value = clean($(tds[1]).text());
 
       if (key.includes("student")) data.studentName = value;
-      if (key.includes("father")) data.fatherName = value;
-      if (key.includes("mother")) data.motherName = value;
       if (key.includes("school") || key.includes("college")) data.schoolName = value;
       if (key === "roll code") data.rollCode = value;
       if (key === "roll number") data.rollNo = value;
@@ -112,15 +113,15 @@ function extractResultData(html) {
 }
 
 // ===============================
-// GET FORM TOKENS
+// TOKEN FETCH
 // ===============================
-async function getFormSession() {
-  const getRes = await client.get(BASE_URL);
+async function getSessionData() {
+  const res = await client.get(BASE_URL);
 
-  const html = getRes.data;
+  const html = res.data;
   const $ = cheerio.load(html);
 
-  const rawCookies = getRes.headers["set-cookie"] || [];
+  const rawCookies = res.headers["set-cookie"] || [];
   const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
 
   const VIEWSTATE = getHidden($, "__VIEWSTATE");
@@ -128,7 +129,7 @@ async function getFormSession() {
   const EVENTVALIDATION = getHidden($, "__EVENTVALIDATION");
 
   if (!VIEWSTATE || !EVENTVALIDATION) {
-    throw new Error("Hidden fields missing");
+    throw new Error("Could not fetch ASP.NET hidden fields");
   }
 
   return {
@@ -140,82 +141,102 @@ async function getFormSession() {
 }
 
 // ===============================
-// CHECK ONE STUDENT
+// CHECK ONE ROLL CODE
 // ===============================
-async function checkStudent(session, rollCode, rollNumber) {
-  const payload = new URLSearchParams();
-  payload.append("__EVENTTARGET", "");
-  payload.append("__EVENTARGUMENT", "");
-  payload.append("__VIEWSTATE", session.VIEWSTATE);
-  payload.append("__VIEWSTATEGENERATOR", session.VIEWSTATEGENERATOR);
-  payload.append("__EVENTVALIDATION", session.EVENTVALIDATION);
-  payload.append("mobile", String(rollCode));
-  payload.append("password", String(rollNumber));
-  payload.append("captchaInput", generateCaptcha());
-  payload.append("btn_login", "View Result");
+async function checkRollCode(rollCode, sessionData) {
+  for (const rollNumber of TEST_ROLL_NUMBERS) {
+    try {
+      const payload = new URLSearchParams();
+      payload.append("__EVENTTARGET", "");
+      payload.append("__EVENTARGUMENT", "");
+      payload.append("__VIEWSTATE", sessionData.VIEWSTATE);
+      payload.append("__VIEWSTATEGENERATOR", sessionData.VIEWSTATEGENERATOR);
+      payload.append("__EVENTVALIDATION", sessionData.EVENTVALIDATION);
+      payload.append("mobile", String(rollCode));
+      payload.append("password", rollNumber);
+      payload.append("captchaInput", generateCaptcha());
+      payload.append("btn_login", "View Result");
 
-  const postRes = await client.post(POST_URL, payload.toString(), {
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Cookie": session.cookieHeader,
-      "Referer": BASE_URL,
-      "Origin": "https://interbiharboard.com"
+      const res = await client.post(POST_URL, payload.toString(), {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Cookie": sessionData.cookieHeader,
+          "Referer": BASE_URL,
+          "Origin": "https://interbiharboard.com"
+        }
+      });
+
+      const result = extractResultData(res.data);
+
+      if (
+        result.schoolName &&
+        result.rollCode === String(rollCode) &&
+        result.rollNo === rollNumber
+      ) {
+        return {
+          valid: true,
+          schoolName: result.schoolName
+        };
+      }
+    } catch (err) {
+      // ignore per-roll-number error
     }
-  });
-
-  const result = extractResultData(postRes.data);
-
-  if (result.schoolName && result.rollCode && result.rollNo) {
-    return result;
   }
 
-  return null;
+  return { valid: false };
 }
 
 // ===============================
 // MAIN
 // ===============================
 (async () => {
-  let validRollCodes = loadJson(OUTPUT_FILE, {});
+  const validColleges = loadJSON(OUTPUT_FILE, {});
   let current = loadProgress();
 
-  console.log(`🚀 Starting from roll code: ${current}`);
+  console.log(`🚀 Starting from: ${current}`);
 
-  for (let rollCode = current; rollCode <= END_ROLL_CODE; rollCode++) {
-    console.log(`Checking: ${rollCode}`);
+  while (current <= END_ROLL_CODE) {
+    try {
+      console.log(`\n🔄 New batch starting from ${current}...`);
+      const sessionData = await getSessionData();
 
-    // Already saved? skip
-    if (validRollCodes[String(rollCode)]) {
-      saveProgress(rollCode + 1);
-      continue;
-    }
+      const batchEnd = Math.min(current + BATCH_SIZE - 1, END_ROLL_CODE);
+      let batchRollCodes = [];
 
-    let found = false;
-
-    for (const rollNumber of TEST_ROLL_NUMBERS) {
-      try {
-        const session = await getFormSession();
-        const result = await checkStudent(session, rollCode, rollNumber);
-
-        if (result) {
-          validRollCodes[String(rollCode)] = result.schoolName;
-          saveJson(OUTPUT_FILE, validRollCodes);
-
-          console.log(`✅ Saved: ${rollCode} - ${result.schoolName}`);
-          found = true;
-          break;
-        }
-      } catch (err) {
-        console.log(`⚠ Error on ${rollCode} / ${rollNumber}: ${err.message}`);
+      for (let i = current; i <= batchEnd; i++) {
+        batchRollCodes.push(i);
       }
-    }
 
-    if (!found) {
-      console.log(`❌ Not found: ${rollCode}`);
-    }
+      for (let i = 0; i < batchRollCodes.length; i += CONCURRENCY) {
+        const chunk = batchRollCodes.slice(i, i + CONCURRENCY);
 
-    saveProgress(rollCode + 1);
+        console.log(`Checking: ${chunk.join(", ")}`);
+
+        const results = await Promise.all(
+          chunk.map(rc => checkRollCode(rc, sessionData))
+        );
+
+        for (let j = 0; j < chunk.length; j++) {
+          const rc = chunk[j];
+          const result = results[j];
+
+          if (result.valid) {
+            validColleges[rc] = result.schoolName;
+            saveJSON(OUTPUT_FILE, validColleges);
+            console.log(`✅ Saved: ${rc} - ${result.schoolName}`);
+          }
+        }
+
+        saveProgress(chunk[chunk.length - 1] + 1);
+      }
+
+      current = batchEnd + 1;
+
+    } catch (err) {
+      console.log(`❌ Batch error at ${current}: ${err.message}`);
+      console.log("⏳ Retrying next batch...");
+    }
   }
 
-  console.log("🎉 Done! All roll codes checked.");
+  console.log("\n🎉 Finished checking all roll codes.");
 })();
