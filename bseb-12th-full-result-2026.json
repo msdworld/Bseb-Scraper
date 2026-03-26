@@ -1,0 +1,54 @@
+{
+  "11008": {
+    "studentName": "RAGHURAJ KUMAR",
+    "fatherName": "RANGLAL RAI",
+    "regNumber": "R-110080993-23",
+    "BSEBUniqueId": "2231260081699",
+    "schoolName": "A. N. COLLEGE, PATNA",
+    "rollCode": "11008",
+    "rollNo": "26010005",
+    "stream": "SCIENCE",
+    "totalMarks": "212 (Two Hundred Twelve)",
+    "Division": "3rd Division U/R",
+    "subjects": [
+      {
+        "subject": "English",
+        "FMarks": "100",
+        "PMarks": "30",
+        "theory": "24",
+        "subTotal": "30 *",
+        "regulationTheory": "6"
+      },
+      {
+        "subject": "Hindi",
+        "FMarks": "100",
+        "PMarks": "30",
+        "theory": "50",
+        "subTotal": "50"
+      },
+      {
+        "subject": "Physics",
+        "FMarks": "100",
+        "PMarks": "33",
+        "theory": "29",
+        "subTotal": "52",
+        "practical": "23"
+      },
+      {
+        "subject": "Chemistry",
+        "FMarks": "100",
+        "PMarks": "33",
+        "theory": "21",
+        "subTotal": "45",
+        "practical": "24"
+      },
+      {
+        "subject": "Mathematics",
+        "FMarks": "100",
+        "PMarks": "30",
+        "theory": "35",
+        "subTotal": "35"
+      }
+    ]
+  }
+}
