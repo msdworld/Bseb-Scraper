@@ -14,7 +14,7 @@ const PROGRESS_FILE = "progress.txt";
 // 🔍 TEST ONLY
 const TEST_ROLL_CODE = "11008";
 const TEST_START_ROLL_NO = 26010001;
-const TEST_END_ROLL_NO = 26010020;
+const TEST_END_ROLL_NO = 26010005;
 
 // Speed controls
 const CONCURRENCY = 5;
@@ -102,32 +102,49 @@ function isSectionHeading(text) {
 }
 
 // ===============================
-// SUBJECT PARSER (FINAL FIXED)
+// SUBJECT PARSER (STRICT FINAL)
 // ===============================
 function parseSubjects($) {
   const subjects = [];
+  let marksTableFound = false;
 
   $("table").each((_, table) => {
+    if (marksTableFound) return;
+
     const rows = $(table).find("tr");
     if (rows.length < 3) return;
 
-    const firstRowText = clean($(rows[0]).text()).toLowerCase();
-    const secondRowText = clean($(rows[1]).text()).toLowerCase();
-    const tableText = clean($(table).text()).toLowerCase();
+    const row1 = [];
+    const row2 = [];
 
-    // Must be the marks table
-    if (
-      !tableText.includes("subject total") ||
-      !tableText.includes("full marks") ||
-      !tableText.includes("pass marks") ||
-      !tableText.includes("theory")
-    ) {
-      return;
-    }
+    $(rows[0]).find("td,th").each((_, cell) => {
+      row1.push(clean($(cell).text()));
+    });
 
-    console.log("\n📚 PARSING SUBJECT TABLE...");
+    $(rows[1]).find("td,th").each((_, cell) => {
+      row2.push(clean($(cell).text()));
+    });
 
-    // Start AFTER the 2 header rows
+    const row1Text = row1.join(" ").toLowerCase();
+    const row2Text = row2.join(" ").toLowerCase();
+
+    // Must be the exact marks table
+    const isMarksTable =
+      row1Text.includes("subject") &&
+      row1Text.includes("full marks") &&
+      row1Text.includes("pass marks") &&
+      row1Text.includes("theory") &&
+      row1Text.includes("practical") &&
+      row1Text.includes("subject total") &&
+      row2Text.includes("th.") &&
+      row2Text.includes("pr.");
+
+    if (!isMarksTable) return;
+
+    marksTableFound = true;
+    console.log("\n📚 CORRECT MARKS TABLE FOUND");
+
+    // Start after the 2 header rows
     for (let i = 2; i < rows.length; i++) {
       const row = rows[i];
       const cells = [];
@@ -143,12 +160,11 @@ function parseSubjects($) {
         continue;
       }
 
-      // Real subject rows should have 8 columns
-      if (cells.length < 8) continue;
+      // Only real subject rows should have 8 columns
+      if (cells.length !== 8) continue;
 
       const subjectName = clean(cells[0]);
 
-      // Skip accidental junk rows
       if (
         !subjectName ||
         subjectName.toLowerCase() === "subject" ||
@@ -322,7 +338,7 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
   const fullResults = loadJSON(OUTPUT_FILE, {});
   if (!fullResults[TEST_ROLL_CODE]) fullResults[TEST_ROLL_CODE] = {};
 
-  // Force create file
+  // Force create file immediately
   saveJSON(OUTPUT_FILE, fullResults);
   console.log(`📁 Ensured output file exists: ${OUTPUT_FILE}`);
 
