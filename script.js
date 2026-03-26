@@ -13,8 +13,8 @@ const PROGRESS_FILE = "progress.txt";
 
 // 🔍 MINI TEST ONLY
 const TEST_ROLL_CODE = "11008";
-const TEST_START_ROLL_NO = 26010001;
-const TEST_END_ROLL_NO = 26010002;
+const TEST_START_ROLL_NO = 26010002;
+const TEST_END_ROLL_NO = 26010005;
 
 // Speed controls
 const CONCURRENCY = 5;
@@ -22,7 +22,7 @@ const BATCH_SIZE = 20;
 const REQUEST_TIMEOUT = 5000;
 
 // Save controls
-const SAVE_EVERY_VALID_RESULTS = 5;
+const SAVE_EVERY_VALID_RESULTS = 1; // for mini test, save every valid immediately
 
 // ===============================
 // AXIOS CLIENT
@@ -152,13 +152,7 @@ function parseSubjects($) {
       });
 
       if (!cells.length) continue;
-
-      // Skip section headings
-      if (cells.length === 1 && isSectionHeading(cells[0])) {
-        continue;
-      }
-
-      // Only real subject rows
+      if (cells.length === 1 && isSectionHeading(cells[0])) continue;
       if (cells.length !== 8) continue;
 
       const subjectName = clean(cells[0]);
@@ -222,9 +216,6 @@ function extractFullResult(html) {
   const $ = cheerio.load(html);
   const kv = extractKeyValues($);
   const subjects = parseSubjects($);
-
-  console.log("\n🧾 EXTRACTED KEY FIELDS:");
-  console.log(kv);
 
   return {
     studentName: kv["Student's Name"] || null,
@@ -326,19 +317,16 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
 // ===============================
 (async () => {
   const fullResults = loadJSON(OUTPUT_FILE, {});
-  if (!fullResults[TEST_ROLL_CODE]) fullResults[TEST_ROLL_CODE] = {};
 
   saveJSON(OUTPUT_FILE, fullResults);
   console.log(`📁 Ensured output file exists: ${OUTPUT_FILE}`);
 
-  let unsavedValidCount = 0;
   let foundCount = 0;
+  let currentRollNo = TEST_START_ROLL_NO;
 
   console.log(`🚀 TEST MODE STARTED`);
   console.log(`🏫 Roll Code: ${TEST_ROLL_CODE}`);
   console.log(`🔢 Roll No Range: ${TEST_START_ROLL_NO} → ${TEST_END_ROLL_NO}`);
-
-  let currentRollNo = TEST_START_ROLL_NO;
 
   while (currentRollNo <= TEST_END_ROLL_NO) {
     const sessionData = await getSessionData();
@@ -364,32 +352,20 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
         const result = results[j];
 
         if (result.valid) {
-          if (!fullResults[TEST_ROLL_CODE][rn]) {
-            fullResults[TEST_ROLL_CODE][rn] = result.data;
-            unsavedValidCount++;
-            foundCount++;
+          // SAVE DIRECTLY UNDER ROLL CODE
+          fullResults[TEST_ROLL_CODE] = result.data;
 
-            console.log(`✅ FOUND: ${TEST_ROLL_CODE} - ${rn} - ${result.data.studentName}`);
-            console.log(JSON.stringify(result.data, null, 2));
-          }
+          foundCount++;
+
+          console.log(`✅ FOUND: ${TEST_ROLL_CODE} - ${rn} - ${result.data.studentName}`);
+          console.log(JSON.stringify(result.data, null, 2));
+
+          saveJSON(OUTPUT_FILE, fullResults);
+          console.log(`💾 JSON file written: ${OUTPUT_FILE}`);
         }
       }
 
       saveProgress(TEST_ROLL_CODE, chunk[chunk.length - 1] + 1);
-
-      if (unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
-        saveJSON(OUTPUT_FILE, fullResults);
-        console.log(`💾 JSON file written: ${OUTPUT_FILE}`);
-        console.log(`💾 Saved ${unsavedValidCount} test results`);
-        unsavedValidCount = 0;
-      }
-    }
-
-    if (unsavedValidCount > 0) {
-      saveJSON(OUTPUT_FILE, fullResults);
-      console.log(`💾 JSON file written: ${OUTPUT_FILE}`);
-      console.log(`💾 Batch-end save: ${unsavedValidCount} test results`);
-      unsavedValidCount = 0;
     }
 
     currentRollNo = batchEnd + 1;
@@ -400,5 +376,4 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
 
   console.log(`\n🎉 TEST MODE COMPLETED`);
   console.log(`📊 Total students found: ${foundCount}`);
-  console.log(`📁 Output file: ${OUTPUT_FILE}`);
 })();
