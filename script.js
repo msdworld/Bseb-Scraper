@@ -14,7 +14,7 @@ const PROGRESS_FILE = "progress.txt";
 // 🔍 TEST ONLY
 const TEST_ROLL_CODE = "11008";
 const TEST_START_ROLL_NO = 26010001;
-const TEST_END_ROLL_NO = 26010060;
+const TEST_END_ROLL_NO = 26010020;
 
 // Speed controls
 const CONCURRENCY = 5;
@@ -106,13 +106,10 @@ function parseSubjects($) {
 
     if (
       headerText.includes("subject") &&
-      (
-        headerText.includes("full") ||
-        headerText.includes("pass") ||
-        headerText.includes("theory") ||
-        headerText.includes("marks") ||
-        headerText.includes("total")
-      )
+      headerText.includes("full marks") &&
+      headerText.includes("pass marks") &&
+      headerText.includes("theory") &&
+      headerText.includes("subject total")
     ) {
       console.log("\n📚 SUBJECT TABLE HEADERS DETECTED:");
       console.log(headers);
@@ -130,52 +127,28 @@ function parseSubjects($) {
           row[h] = cols[idx] !== undefined ? cols[idx] : "";
         });
 
-        const subjectName =
-          row["Subject"] ||
-          row["SUBJECT"] ||
-          row["Sub"] ||
-          cols[0] ||
-          "";
-
+        const subjectName = row["Subject"] || cols[0] || "";
         if (!subjectName) continue;
 
         const obj = {
           subject: subjectName,
-          FMarks:
-            row["Full Marks"] ||
-            row["F.M."] ||
-            row["Full"] ||
-            row["FM"] ||
-            "",
-          PMarks:
-            row["Pass Marks"] ||
-            row["P.M."] ||
-            row["Pass"] ||
-            row["PM"] ||
-            "",
-          theory:
-            row["Theory"] ||
-            row["Th"] ||
-            row["Theory Marks"] ||
-            row["TH"] ||
-            "",
-          subTotal:
-            row["Total"] ||
-            row["Total Marks"] ||
-            row["Sub Total"] ||
-            row["Subject Total"] ||
-            ""
+          FMarks: row["Full Marks"] || "",
+          PMarks: row["Pass Marks"] || "",
+          theory: row["Theory"] || "",
+          subTotal: row["Subject Total"] || ""
         };
 
-        const practicalValue =
-          row["Practical"] ||
-          row["Pr"] ||
-          row["Practical Marks"] ||
-          row["PR"] ||
-          "";
+        const practicalValue = row["Practical"] || "";
+        const regulationValue = row["Regulation"] || "";
 
+        // Only include practical if actual value exists
         if (practicalValue !== "") {
           obj.practical = practicalValue;
+        }
+
+        // Only include regulation if actual value exists
+        if (regulationValue !== "") {
+          obj.regulation = regulationValue;
         }
 
         subjects.push(obj);
@@ -213,20 +186,16 @@ function extractFullResult(html) {
   console.log(kv);
 
   return {
-    studentName: kv["Student Name"] || kv["Name of Student"] || null,
-    fatherName: kv["Father's Name"] || kv["Father Name"] || null,
-    regNumber: kv["Registration Number"] || kv["Registration No"] || null,
-    BSEBUniqueId: kv["BSEB Unique ID"] || kv["Unique ID"] || null,
-    schoolName:
-      kv["School / College Name"] ||
-      kv["School Name"] ||
-      kv["College Name"] ||
-      null,
+    studentName: kv["Student's Name"] || null,
+    fatherName: kv["Father's Name"] || null,
+    regNumber: kv["Registration Number"] || null,
+    BSEBUniqueId: kv["BSEB Unique Id"] || null,
+    schoolName: kv["School/College Name"] || null,
     rollCode: kv["Roll Code"] || null,
-    rollNo: kv["Roll Number"] || kv["Roll No"] || null,
-    stream: kv["Faculty"] || kv["Stream"] || null,
-    totalMarks: kv["Total Marks"] || kv["Grand Total"] || null,
-    Division: kv["Division"] || kv["Result"] || kv["Result Status"] || null,
+    rollNo: kv["Roll Number"] || null,
+    stream: kv["Faculty"] || null,
+    totalMarks: kv["Aggregate Marks:"] || null,
+    Division: kv["Result/Division:"] || null,
     subjects
   };
 }
@@ -318,6 +287,10 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
   const fullResults = loadJSON(OUTPUT_FILE, {});
   if (!fullResults[TEST_ROLL_CODE]) fullResults[TEST_ROLL_CODE] = {};
 
+  // Force create file immediately
+  saveJSON(OUTPUT_FILE, fullResults);
+  console.log(`📁 Ensured output file exists: ${OUTPUT_FILE}`);
+
   let unsavedValidCount = 0;
   let foundCount = 0;
 
@@ -366,6 +339,7 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
 
       if (unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
         saveJSON(OUTPUT_FILE, fullResults);
+        console.log(`💾 JSON file written: ${OUTPUT_FILE}`);
         console.log(`💾 Saved ${unsavedValidCount} test results`);
         unsavedValidCount = 0;
       }
@@ -373,6 +347,7 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
 
     if (unsavedValidCount > 0) {
       saveJSON(OUTPUT_FILE, fullResults);
+      console.log(`💾 JSON file written: ${OUTPUT_FILE}`);
       console.log(`💾 Batch-end save: ${unsavedValidCount} test results`);
       unsavedValidCount = 0;
     }
@@ -381,6 +356,7 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
   }
 
   saveJSON(OUTPUT_FILE, fullResults);
+  console.log(`📁 Final output saved: ${OUTPUT_FILE}`);
 
   console.log(`\n🎉 TEST MODE COMPLETED`);
   console.log(`📊 Total students found: ${foundCount}`);
