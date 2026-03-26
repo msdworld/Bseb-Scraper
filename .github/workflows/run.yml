@@ -7,9 +7,14 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -19,13 +24,25 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Install Chromium
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
-
       - name: Run Script
         run: node script.js
+
+      - name: Show Saved Files
+        run: |
+          echo "===== FILE LIST ====="
+          ls -la
+          echo "===== JSON FILE ====="
+          cat bseb-12th-college-list-2026.json || echo "JSON file not found"
+          echo "===== PROGRESS FILE ====="
+          cat progress.txt || echo "Progress file not found"
+
+      - name: Commit and Push Results
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add bseb-12th-college-list-2026.json progress.txt
+          git commit -m "Update valid roll code data" || echo "No changes to commit"
+          git push
 
       - name: Upload Result Files
         uses: actions/upload-artifact@v4
