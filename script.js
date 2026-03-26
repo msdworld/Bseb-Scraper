@@ -100,10 +100,7 @@ const fs = require("fs");
           }
         });
 
-        await Promise.allSettled([
-          page.click("#btn_login")
-        ]);
-
+        await page.click("#btn_login");
         await new Promise(resolve => setTimeout(resolve, 2500));
 
         const pageText = await page.evaluate(() => document.body.innerText.toLowerCase());
@@ -187,7 +184,6 @@ const fs = require("fs");
           break;
         }
 
-        // reopen form for next roll number
         try {
           await openForm();
         } catch {}
@@ -200,7 +196,7 @@ const fs = require("fs");
       }
 
       if (rollCode % 100 === 0) {
-        console.log("⏳ SHORT COOL DOWN...");
+        console.log("⏳ COOL DOWN 2s...");
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
@@ -208,8 +204,4 @@ const fs = require("fs");
     console.log("🎉 DONE");
     await browser.close();
 
-  } catch (err) {
-    console.error("❌ FATAL ERROR:", err.message);
-    process.exit(1);
-  }
-})();
+  } catch (err)
