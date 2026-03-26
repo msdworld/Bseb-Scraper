@@ -87,72 +87,103 @@ function saveProgress(currentRollCode, currentRollNo) {
   );
 }
 
+function isSectionHeading(text) {
+  const t = clean(text).toLowerCase();
+  return (
+    t.startsWith("1.") ||
+    t.startsWith("2.") ||
+    t.startsWith("3.") ||
+    t.includes("अनिवार्य") ||
+    t.includes("ऐच्छिक") ||
+    t.includes("additional") ||
+    t.includes("compulsory") ||
+    t.includes("elective")
+  );
+}
+
 // ===============================
-// SUBJECT PARSER
+// SUBJECT PARSER (FINAL FIXED)
 // ===============================
 function parseSubjects($) {
   const subjects = [];
 
   $("table").each((_, table) => {
     const rows = $(table).find("tr");
-    if (rows.length < 2) return;
+    if (rows.length < 3) return;
 
-    const headers = [];
-    $(rows[0]).find("th,td").each((_, cell) => {
-      headers.push(clean($(cell).text()));
-    });
+    const firstRowText = clean($(rows[0]).text()).toLowerCase();
+    const secondRowText = clean($(rows[1]).text()).toLowerCase();
+    const tableText = clean($(table).text()).toLowerCase();
 
-    const headerText = headers.join(" ").toLowerCase();
-
+    // Must be the marks table
     if (
-      headerText.includes("subject") &&
-      headerText.includes("full marks") &&
-      headerText.includes("pass marks") &&
-      headerText.includes("theory") &&
-      headerText.includes("subject total")
+      !tableText.includes("subject total") ||
+      !tableText.includes("full marks") ||
+      !tableText.includes("pass marks") ||
+      !tableText.includes("theory")
     ) {
-      console.log("\n📚 SUBJECT TABLE HEADERS DETECTED:");
-      console.log(headers);
+      return;
+    }
 
-      for (let i = 1; i < rows.length; i++) {
-        const cols = [];
-        $(rows[i]).find("td,th").each((_, cell) => {
-          cols.push(clean($(cell).text()));
-        });
+    console.log("\n📚 PARSING SUBJECT TABLE...");
 
-        if (!cols.length || cols.every(v => !v)) continue;
+    // Start AFTER the 2 header rows
+    for (let i = 2; i < rows.length; i++) {
+      const row = rows[i];
+      const cells = [];
 
-        const row = {};
-        headers.forEach((h, idx) => {
-          row[h] = cols[idx] !== undefined ? cols[idx] : "";
-        });
+      $(row).find("td,th").each((_, cell) => {
+        cells.push(clean($(cell).text()));
+      });
 
-        const subjectName = row["Subject"] || cols[0] || "";
-        if (!subjectName) continue;
+      if (!cells.length) continue;
 
-        const obj = {
-          subject: subjectName,
-          FMarks: row["Full Marks"] || "",
-          PMarks: row["Pass Marks"] || "",
-          theory: row["Theory"] || "",
-          subTotal: row["Subject Total"] || ""
-        };
-
-        const practicalValue = row["Practical"] || "";
-        const regulationValue = row["Regulation"] || "";
-
-        // Only include practical if actual value exists
-        if (practicalValue !== "") {
-          obj.practical = practicalValue;
-        }
-
-        // Only include regulation if actual value exists
-        if (regulationValue !== "") {
-          obj.regulation = regulationValue;
-        }
-
-        subjects.push(obj);
+      // Skip section rows like "1. अनिवार्य (Compulsory)"
+      if (cells.length === 1 && isSectionHeading(cells[0])) {
+        continue;
       }
+
+      // Real subject rows should have 8 columns
+      if (cells.length < 8) continue;
+
+      const subjectName = clean(cells[0]);
+
+      // Skip accidental junk rows
+      if (
+        !subjectName ||
+        subjectName.toLowerCase() === "subject" ||
+        subjectName.toLowerCase() === "th." ||
+        subjectName.toLowerCase() === "pr." ||
+        isSectionHeading(subjectName)
+      ) {
+        continue;
+      }
+
+      const obj = {
+        subject: subjectName,
+        FMarks: clean(cells[1] || ""),
+        PMarks: clean(cells[2] || ""),
+        theory: clean(cells[3] || ""),
+        subTotal: clean(cells[7] || "")
+      };
+
+      const practical = clean(cells[4] || "");
+      const regulationTheory = clean(cells[5] || "");
+      const regulationPractical = clean(cells[6] || "");
+
+      if (practical !== "") {
+        obj.practical = practical;
+      }
+
+      if (regulationTheory !== "") {
+        obj.regulationTheory = regulationTheory;
+      }
+
+      if (regulationPractical !== "") {
+        obj.regulationPractical = regulationPractical;
+      }
+
+      subjects.push(obj);
     }
   });
 
@@ -167,10 +198,14 @@ function extractKeyValues($) {
 
   $("table tr").each((_, row) => {
     const tds = $(row).find("td");
+
     if (tds.length === 2) {
-      const key = clean($(tds[0]).text());
+      const key = clean($(tds[0]).text()).replace(/:$/, "");
       const value = clean($(tds[1]).text());
-      if (key) data[key] = value;
+
+      if (key && value) {
+        data[key] = value;
+      }
     }
   });
 
@@ -194,8 +229,8 @@ function extractFullResult(html) {
     rollCode: kv["Roll Code"] || null,
     rollNo: kv["Roll Number"] || null,
     stream: kv["Faculty"] || null,
-    totalMarks: kv["Aggregate Marks:"] || null,
-    Division: kv["Result/Division:"] || null,
+    totalMarks: kv["Aggregate Marks"] || null,
+    Division: kv["Result/Division"] || null,
     subjects
   };
 }
@@ -287,7 +322,7 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
   const fullResults = loadJSON(OUTPUT_FILE, {});
   if (!fullResults[TEST_ROLL_CODE]) fullResults[TEST_ROLL_CODE] = {};
 
-  // Force create file immediately
+  // Force create file
   saveJSON(OUTPUT_FILE, fullResults);
   console.log(`📁 Ensured output file exists: ${OUTPUT_FILE}`);
 
