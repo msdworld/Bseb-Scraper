@@ -11,10 +11,10 @@ const POST_URL = "https://interbiharboard.com/Result.aspx";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
 const PROGRESS_FILE = "progress.txt";
 
-// 🔍 TEST ONLY
+// 🔍 MINI TEST ONLY
 const TEST_ROLL_CODE = "11008";
 const TEST_START_ROLL_NO = 26010001;
-const TEST_END_ROLL_NO = 26010005;
+const TEST_END_ROLL_NO = 26010002;
 
 // Speed controls
 const CONCURRENCY = 5;
@@ -69,7 +69,7 @@ function loadJSON(file, fallback = {}) {
 }
 
 function saveJSON(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data));
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
 function saveProgress(currentRollCode, currentRollNo) {
@@ -102,7 +102,7 @@ function isSectionHeading(text) {
 }
 
 // ===============================
-// SUBJECT PARSER (STRICT FINAL)
+// SUBJECT PARSER
 // ===============================
 function parseSubjects($) {
   const subjects = [];
@@ -128,7 +128,6 @@ function parseSubjects($) {
     const row1Text = row1.join(" ").toLowerCase();
     const row2Text = row2.join(" ").toLowerCase();
 
-    // Must be the exact marks table
     const isMarksTable =
       row1Text.includes("subject") &&
       row1Text.includes("full marks") &&
@@ -144,7 +143,6 @@ function parseSubjects($) {
     marksTableFound = true;
     console.log("\n📚 CORRECT MARKS TABLE FOUND");
 
-    // Start after the 2 header rows
     for (let i = 2; i < rows.length; i++) {
       const row = rows[i];
       const cells = [];
@@ -155,12 +153,12 @@ function parseSubjects($) {
 
       if (!cells.length) continue;
 
-      // Skip section rows like "1. अनिवार्य (Compulsory)"
+      // Skip section headings
       if (cells.length === 1 && isSectionHeading(cells[0])) {
         continue;
       }
 
-      // Only real subject rows should have 8 columns
+      // Only real subject rows
       if (cells.length !== 8) continue;
 
       const subjectName = clean(cells[0]);
@@ -187,17 +185,9 @@ function parseSubjects($) {
       const regulationTheory = clean(cells[5] || "");
       const regulationPractical = clean(cells[6] || "");
 
-      if (practical !== "") {
-        obj.practical = practical;
-      }
-
-      if (regulationTheory !== "") {
-        obj.regulationTheory = regulationTheory;
-      }
-
-      if (regulationPractical !== "") {
-        obj.regulationPractical = regulationPractical;
-      }
+      if (practical !== "") obj.practical = practical;
+      if (regulationTheory !== "") obj.regulationTheory = regulationTheory;
+      if (regulationPractical !== "") obj.regulationPractical = regulationPractical;
 
       subjects.push(obj);
     }
@@ -338,7 +328,6 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
   const fullResults = loadJSON(OUTPUT_FILE, {});
   if (!fullResults[TEST_ROLL_CODE]) fullResults[TEST_ROLL_CODE] = {};
 
-  // Force create file immediately
   saveJSON(OUTPUT_FILE, fullResults);
   console.log(`📁 Ensured output file exists: ${OUTPUT_FILE}`);
 
