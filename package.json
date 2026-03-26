@@ -1,12 +1,13 @@
 {
   "name": "bseb-scraper",
   "version": "1.0.0",
-  "description": "BSEB 12th Result Scraper",
+  "description": "BSEB Result Scraper",
   "main": "script.js",
   "scripts": {
     "start": "node script.js"
   },
   "dependencies": {
-    "puppeteer-core": "^24.5.0"
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0"
   }
 }
