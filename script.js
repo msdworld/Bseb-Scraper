@@ -22,9 +22,12 @@ const OUTPUT_FILE = "bseb-12th-college-list-2026.json";
 const PROGRESS_FILE = "progress.txt";
 
 // Speed controls
-const CONCURRENCY = 5;       // 5 parallel requests
-const BATCH_SIZE = 50;       // refresh token after every 50 roll codes
-const REQUEST_TIMEOUT = 15000;
+const CONCURRENCY = 10;
+const BATCH_SIZE = 40;
+const REQUEST_TIMEOUT = 5000;
+
+// Save controls
+const SAVE_EVERY_VALID = 20;
 
 // ===============================
 // AXIOS CLIENT
@@ -113,7 +116,7 @@ function extractResultData(html) {
 }
 
 // ===============================
-// TOKEN FETCH
+// FETCH SESSION / TOKENS
 // ===============================
 async function getSessionData() {
   const res = await client.get(BASE_URL);
@@ -166,6 +169,16 @@ async function checkRollCode(rollCode, sessionData) {
         }
       });
 
+      const html = String(res.data || "").toLowerCase();
+
+      if (
+        html.includes("invalid") ||
+        html.includes("no record") ||
+        html.includes("not found")
+      ) {
+        continue;
+      }
+
       const result = extractResultData(res.data);
 
       if (
@@ -179,7 +192,7 @@ async function checkRollCode(rollCode, sessionData) {
         };
       }
     } catch (err) {
-      // ignore per-roll-number error
+      // ignore individual request error
     }
   }
 
@@ -192,6 +205,8 @@ async function checkRollCode(rollCode, sessionData) {
 (async () => {
   const validColleges = loadJSON(OUTPUT_FILE, {});
   let current = loadProgress();
+  let unsavedValidCount = 0;
+  let totalFoundThisRun = 0;
 
   console.log(`🚀 Starting from: ${current}`);
 
@@ -221,13 +236,34 @@ async function checkRollCode(rollCode, sessionData) {
           const result = results[j];
 
           if (result.valid) {
-            validColleges[rc] = result.schoolName;
-            saveJSON(OUTPUT_FILE, validColleges);
-            console.log(`✅ Saved: ${rc} - ${result.schoolName}`);
+            if (!validColleges[rc]) {
+              validColleges[rc] = result.schoolName;
+              unsavedValidCount++;
+              totalFoundThisRun++;
+
+              console.log(`✅ Found: ${rc} - ${result.schoolName}`);
+            }
           }
         }
 
+        // Save progress after every chunk
         saveProgress(chunk[chunk.length - 1] + 1);
+
+        // Save JSON only after every 20 new valid roll codes
+        if (unsavedValidCount >= SAVE_EVERY_VALID) {
+          saveJSON(OUTPUT_FILE, validColleges);
+          console.log(`💾 Saved ${unsavedValidCount} new valid roll codes to JSON`);
+          console.log(`📁 Total valid roll codes saved: ${Object.keys(validColleges).length}`);
+          unsavedValidCount = 0;
+        }
+      }
+
+      // Save at end of every batch too (important safety)
+      if (unsavedValidCount > 0) {
+        saveJSON(OUTPUT_FILE, validColleges);
+        console.log(`💾 Batch-end save: ${unsavedValidCount} new valid roll codes saved`);
+        console.log(`📁 Total valid roll codes saved: ${Object.keys(validColleges).length}`);
+        unsavedValidCount = 0;
       }
 
       current = batchEnd + 1;
@@ -238,5 +274,11 @@ async function checkRollCode(rollCode, sessionData) {
     }
   }
 
+  // Final save safety
+  saveJSON(OUTPUT_FILE, validColleges);
+  saveProgress(current);
+
   console.log("\n🎉 Finished checking all roll codes.");
+  console.log(`📊 Total new valid roll codes found this run: ${totalFoundThisRun}`);
+  console.log(`📁 Final total valid roll codes: ${Object.keys(validColleges).length}`);
 })();
