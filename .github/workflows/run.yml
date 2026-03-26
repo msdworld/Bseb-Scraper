@@ -1,4 +1,4 @@
-name: BSEB One Student Check
+name: BSEB Valid Roll Code Finder
 
 on:
   workflow_dispatch:
@@ -21,12 +21,16 @@ jobs:
 
       - name: Install Chromium
         run: |
-          sudo apt update
-          sudo apt install -y chromium-browser || sudo apt install -y chromium
-
-      - name: Show Chromium Path
-        run: |
-          which chromium-browser || which chromium
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
 
       - name: Run Script
         run: node script.js
+
+      - name: Upload Result Files
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseb-valid-roll-codes
+          path: |
+            bseb-12th-college-list-2026.json
+            progress.txt
