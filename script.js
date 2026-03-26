@@ -13,7 +13,7 @@ const PROGRESS_FILE = "progress.txt";
 
 // 🔍 MINI TEST ONLY
 const TEST_ROLL_CODE = "11008";
-const TEST_START_ROLL_NO = 26010002;
+const TEST_START_ROLL_NO = 26010001;
 const TEST_END_ROLL_NO = 26010005;
 
 // Speed controls
