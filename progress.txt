@@ -1,5 +1,0 @@
-{
-  "mode": "full-result-test",
-  "currentRollCode": "11008",
-  "currentRollNo": 26010006
-}
