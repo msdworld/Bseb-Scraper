@@ -1,12 +1,12 @@
 {
-  "name": "bseb-scraper",
+  "name": "bseb-direct-post-test",
   "version": "1.0.0",
-  "description": "BSEB Valid Roll Code Finder",
   "main": "script.js",
   "scripts": {
     "start": "node script.js"
   },
   "dependencies": {
-    "puppeteer-core": "^23.11.1"
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0"
   }
 }
