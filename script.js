@@ -8,8 +8,8 @@ const fs = require("fs");
 const BASE_URL = "https://interbiharboard.com/Default.html";
 const POST_URL = "https://interbiharboard.com/Result.aspx";
 
-const START_ROLL_CODE = 11001;
-const END_ROLL_CODE = 20999;
+const START_ROLL_CODE = 21000;
+const END_ROLL_CODE = 30999;
 
 const TEST_ROLL_NUMBERS = [
   "26010011",
@@ -22,7 +22,7 @@ const OUTPUT_FILE = "bseb-12th-college-list-2026.json";
 const PROGRESS_FILE = "progress.txt";
 
 // Speed controls
-const CONCURRENCY = 100;
+const CONCURRENCY = 200;
 const BATCH_SIZE = 1000;
 const REQUEST_TIMEOUT = 5000;
 
