@@ -1,0 +1,114 @@
+{
+  "11008": {
+    "26010001": {
+      "studentName": "ADITI RAJ",
+      "fatherName": "KRISHN BALLABH SINGH",
+      "regNumber": "R-110080013-23",
+      "BSEBUniqueId": "2232260080020",
+      "schoolName": "A. N. COLLEGE, PATNA",
+      "rollCode": "11008",
+      "rollNo": "26010001",
+      "stream": "SCIENCE",
+      "totalMarks": "314 (Three Hundred Fourteen)",
+      "Division": "1st Division",
+      "subjects": [
+        {
+          "subject": "English",
+          "FMarks": "100",
+          "PMarks": "30",
+          "theory": "58",
+          "subTotal": "58"
+        },
+        {
+          "subject": "Hindi",
+          "FMarks": "100",
+          "PMarks": "30",
+          "theory": "68",
+          "subTotal": "68"
+        },
+        {
+          "subject": "Physics",
+          "FMarks": "100",
+          "PMarks": "33",
+          "theory": "32",
+          "subTotal": "57",
+          "practical": "25"
+        },
+        {
+          "subject": "Chemistry",
+          "FMarks": "100",
+          "PMarks": "33",
+          "theory": "29",
+          "subTotal": "55",
+          "practical": "26"
+        },
+        {
+          "subject": "Biology",
+          "FMarks": "100",
+          "PMarks": "33",
+          "theory": "49",
+          "subTotal": "76 D",
+          "practical": "27"
+        },
+        {
+          "subject": "Mathematics",
+          "FMarks": "100",
+          "PMarks": "30",
+          "theory": "48",
+          "subTotal": "48"
+        }
+      ]
+    },
+    "26010002": {
+      "studentName": "KOMAL KUMARI",
+      "fatherName": "KARMU RAJAK",
+      "regNumber": "R-110080115-23",
+      "BSEBUniqueId": "2232260080255",
+      "schoolName": "A. N. COLLEGE, PATNA",
+      "rollCode": "11008",
+      "rollNo": "26010002",
+      "stream": "SCIENCE",
+      "totalMarks": "247 (Two Hundred Forty Seven)",
+      "Division": "2nd Division",
+      "subjects": [
+        {
+          "subject": "English",
+          "FMarks": "100",
+          "PMarks": "30",
+          "theory": "50",
+          "subTotal": "50"
+        },
+        {
+          "subject": "Hindi",
+          "FMarks": "100",
+          "PMarks": "30",
+          "theory": "57",
+          "subTotal": "57"
+        },
+        {
+          "subject": "Physics",
+          "FMarks": "100",
+          "PMarks": "33",
+          "theory": "31",
+          "subTotal": "56",
+          "practical": "25"
+        },
+        {
+          "subject": "Chemistry",
+          "FMarks": "100",
+          "PMarks": "33",
+          "theory": "28",
+          "subTotal": "50",
+          "practical": "22"
+        },
+        {
+          "subject": "Mathematics",
+          "FMarks": "100",
+          "PMarks": "30",
+          "theory": "34",
+          "subTotal": "34"
+        }
+      ]
+    }
+  }
+}
