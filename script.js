@@ -3,7 +3,7 @@ const cheerio = require("cheerio");
 const fs = require("fs");
 
 // ===============================
-// TEST MODE CONFIG
+// CONFIG
 // ===============================
 const BASE_URL = "https://interbiharboard.com/Default.html";
 const POST_URL = "https://interbiharboard.com/Result.aspx";
@@ -11,18 +11,18 @@ const POST_URL = "https://interbiharboard.com/Result.aspx";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
 const PROGRESS_FILE = "progress.txt";
 
-// 🔍 MINI TEST ONLY
+// 🔍 MINI TEST
 const TEST_ROLL_CODE = "11008";
 const TEST_START_ROLL_NO = 26010001;
 const TEST_END_ROLL_NO = 26010005;
 
-// Speed controls
+// Speed
 const CONCURRENCY = 5;
 const BATCH_SIZE = 20;
 const REQUEST_TIMEOUT = 5000;
 
-// Save controls
-const SAVE_EVERY_VALID_RESULTS = 1; // for mini test, save every valid immediately
+// Save
+const SAVE_EVERY_VALID_RESULTS = 3;
 
 // ===============================
 // AXIOS CLIENT
@@ -68,10 +68,6 @@ function loadJSON(file, fallback = {}) {
   }
 }
 
-function saveJSON(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
-}
-
 function saveProgress(currentRollCode, currentRollNo) {
   fs.writeFileSync(
     PROGRESS_FILE,
@@ -87,18 +83,82 @@ function saveProgress(currentRollCode, currentRollNo) {
   );
 }
 
-function isSectionHeading(text) {
+function detectSection(text) {
   const t = clean(text).toLowerCase();
-  return (
-    t.startsWith("1.") ||
-    t.startsWith("2.") ||
-    t.startsWith("3.") ||
-    t.includes("अनिवार्य") ||
-    t.includes("ऐच्छिक") ||
-    t.includes("additional") ||
-    t.includes("compulsory") ||
-    t.includes("elective")
-  );
+
+  if (t.includes("अनिवार्य") || t.includes("compulsory")) return "Compulsory";
+  if (t.includes("ऐच्छिक") || t.includes("elective")) return "Elective";
+  if (t.includes("additional") || t.includes("अतिरिक्त")) return "Additional";
+
+  return null;
+}
+
+// ===============================
+// CUSTOM JSON FORMATTER
+// Subjects will stay one-line each
+// ===============================
+function formatStudent(student, indent = "    ") {
+  const lines = [];
+  lines.push("{");
+  lines.push(`${indent}"studentName": ${JSON.stringify(student.studentName)},`);
+  lines.push(`${indent}"fatherName": ${JSON.stringify(student.fatherName)},`);
+  lines.push(`${indent}"regNumber": ${JSON.stringify(student.regNumber)},`);
+  lines.push(`${indent}"BSEBUniqueId": ${JSON.stringify(student.BSEBUniqueId)},`);
+  lines.push(`${indent}"schoolName": ${JSON.stringify(student.schoolName)},`);
+  lines.push(`${indent}"rollCode": ${JSON.stringify(student.rollCode)},`);
+  lines.push(`${indent}"rollNo": ${JSON.stringify(student.rollNo)},`);
+  lines.push(`${indent}"stream": ${JSON.stringify(student.stream)},`);
+  lines.push(`${indent}"totalMarks": ${JSON.stringify(student.totalMarks)},`);
+  lines.push(`${indent}"Division": ${JSON.stringify(student.Division)},`);
+  lines.push(`${indent}"subjects": [`);
+
+  const subjectLines = student.subjects.map((sub) => {
+    const ordered = {};
+    ordered.subject = sub.subject;
+    ordered.FMarks = sub.FMarks;
+    ordered.PMarks = sub.PMarks;
+    ordered.theory = sub.theory;
+    if (sub.practical !== undefined) ordered.practical = sub.practical;
+    if (sub.regulationTheory !== undefined) ordered.regulationTheory = sub.regulationTheory;
+    if (sub.regulationPractical !== undefined) ordered.regulationPractical = sub.regulationPractical;
+    ordered.subTotal = sub.subTotal;
+    if (sub.extra !== undefined) ordered.extra = sub.extra;
+
+    return `${indent}  ${JSON.stringify(ordered)}`;
+  });
+
+  lines.push(subjectLines.join(",\n"));
+  lines.push(`${indent}]`);
+  lines.push("}");
+  return lines.join("\n");
+}
+
+function saveCustomJSON(file, data) {
+  const rollCodes = Object.keys(data);
+  const lines = [];
+  lines.push("{");
+
+  rollCodes.forEach((rollCode, idx) => {
+    const students = data[rollCode] || {};
+    const rollNoKeys = Object.keys(students);
+
+    lines.push(`  ${JSON.stringify(rollCode)}: {`);
+
+    rollNoKeys.forEach((rollNo, i) => {
+      const student = students[rollNo];
+      const formatted = formatStudent(student, "      ")
+        .split("\n")
+        .map((line, index) => (index === 0 ? `    ${JSON.stringify(rollNo)}: ${line}` : `    ${line}`))
+        .join("\n");
+
+      lines.push(formatted + (i < rollNoKeys.length - 1 ? "," : ""));
+    });
+
+    lines.push(`  }${idx < rollCodes.length - 1 ? "," : ""}`);
+  });
+
+  lines.push("}");
+  fs.writeFileSync(file, lines.join("\n"), "utf8");
 }
 
 // ===============================
@@ -107,6 +167,7 @@ function isSectionHeading(text) {
 function parseSubjects($) {
   const subjects = [];
   let marksTableFound = false;
+  let currentSection = null;
 
   $("table").each((_, table) => {
     if (marksTableFound) return;
@@ -152,7 +213,14 @@ function parseSubjects($) {
       });
 
       if (!cells.length) continue;
-      if (cells.length === 1 && isSectionHeading(cells[0])) continue;
+
+      // Section heading row
+      if (cells.length === 1) {
+        const section = detectSection(cells[0]);
+        if (section) currentSection = section;
+        continue;
+      }
+
       if (cells.length !== 8) continue;
 
       const subjectName = clean(cells[0]);
@@ -161,8 +229,7 @@ function parseSubjects($) {
         !subjectName ||
         subjectName.toLowerCase() === "subject" ||
         subjectName.toLowerCase() === "th." ||
-        subjectName.toLowerCase() === "pr." ||
-        isSectionHeading(subjectName)
+        subjectName.toLowerCase() === "pr."
       ) {
         continue;
       }
@@ -182,6 +249,7 @@ function parseSubjects($) {
       if (practical !== "") obj.practical = practical;
       if (regulationTheory !== "") obj.regulationTheory = regulationTheory;
       if (regulationPractical !== "") obj.regulationPractical = regulationPractical;
+      if (currentSection) obj.extra = currentSection;
 
       subjects.push(obj);
     }
@@ -233,7 +301,7 @@ function extractFullResult(html) {
 }
 
 // ===============================
-// FETCH SESSION
+// SESSION FETCH
 // ===============================
 async function getSessionData() {
   const res = await client.get(BASE_URL);
@@ -261,7 +329,7 @@ async function getSessionData() {
 }
 
 // ===============================
-// CHECK ONE STUDENT
+// FETCH ONE RESULT
 // ===============================
 async function fetchStudentResult(rollCode, rollNo, sessionData) {
   try {
@@ -317,10 +385,12 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
 // ===============================
 (async () => {
   const fullResults = loadJSON(OUTPUT_FILE, {});
+  if (!fullResults[TEST_ROLL_CODE]) fullResults[TEST_ROLL_CODE] = {};
 
-  saveJSON(OUTPUT_FILE, fullResults);
+  saveCustomJSON(OUTPUT_FILE, fullResults);
   console.log(`📁 Ensured output file exists: ${OUTPUT_FILE}`);
 
+  let unsavedValidCount = 0;
   let foundCount = 0;
   let currentRollNo = TEST_START_ROLL_NO;
 
@@ -352,26 +422,36 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
         const result = results[j];
 
         if (result.valid) {
-          // SAVE DIRECTLY UNDER ROLL CODE
-          fullResults[TEST_ROLL_CODE] = result.data;
+          if (!fullResults[TEST_ROLL_CODE][rn]) {
+            fullResults[TEST_ROLL_CODE][rn] = result.data;
+            unsavedValidCount++;
+            foundCount++;
 
-          foundCount++;
-
-          console.log(`✅ FOUND: ${TEST_ROLL_CODE} - ${rn} - ${result.data.studentName}`);
-          console.log(JSON.stringify(result.data, null, 2));
-
-          saveJSON(OUTPUT_FILE, fullResults);
-          console.log(`💾 JSON file written: ${OUTPUT_FILE}`);
+            console.log(`✅ FOUND: ${TEST_ROLL_CODE} - ${rn} - ${result.data.studentName}`);
+            console.log(JSON.stringify(result.data, null, 2));
+          }
         }
       }
 
       saveProgress(TEST_ROLL_CODE, chunk[chunk.length - 1] + 1);
+
+      if (unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
+        saveCustomJSON(OUTPUT_FILE, fullResults);
+        console.log(`💾 JSON file written: ${OUTPUT_FILE}`);
+        unsavedValidCount = 0;
+      }
+    }
+
+    if (unsavedValidCount > 0) {
+      saveCustomJSON(OUTPUT_FILE, fullResults);
+      console.log(`💾 Batch-end save written: ${OUTPUT_FILE}`);
+      unsavedValidCount = 0;
     }
 
     currentRollNo = batchEnd + 1;
   }
 
-  saveJSON(OUTPUT_FILE, fullResults);
+  saveCustomJSON(OUTPUT_FILE, fullResults);
   console.log(`📁 Final output saved: ${OUTPUT_FILE}`);
 
   console.log(`\n🎉 TEST MODE COMPLETED`);
