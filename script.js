@@ -30,7 +30,7 @@ const SAVE_EVERY_VALID_RESULTS = 100; // changed from 20 to 100
 // ===============================
 // SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
-const START_INDEX = 60;
+const START_INDEX = 100;
 const END_INDEX = 150;
 
 // ===============================
