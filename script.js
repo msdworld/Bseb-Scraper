@@ -10,15 +10,14 @@ const POST_URL = "https://interbiharboard.com/Result.aspx";
 
 const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
-const PROGRESS_FILE = "progress.txt";
 
 // Roll number range per roll code
 const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
 // Skip logic
-const FIRST_CHECK_LIMIT = 100;      // if no student found in first 100, skip roll code
-const CONTINUOUS_FAIL_LIMIT = 20;   // if already found some students, then after 20 fail skip
+const FIRST_CHECK_LIMIT = 100;
+const CONTINUOUS_FAIL_LIMIT = 20;
 
 // Speed
 const CONCURRENCY = 500;
@@ -26,7 +25,13 @@ const BATCH_SIZE = 1000;
 const REQUEST_TIMEOUT = 5000;
 
 // Save
-const SAVE_EVERY_VALID_RESULTS = 20;
+const SAVE_EVERY_VALID_RESULTS = 100; // changed from 20 to 100
+
+// ===============================
+// SPLIT RANGE (CHANGE THIS EACH RUN)
+// ===============================
+const START_INDEX = 0;
+const END_INDEX = 2000;
 
 // ===============================
 // AXIOS CLIENT
@@ -75,14 +80,13 @@ function loadJSON(file, fallback = {}) {
 function detectAdditionalSection(text) {
   const t = clean(text).toLowerCase();
   if (t.includes("additional") || t.includes("अतिरिक्त")) {
-    return clean(text); // keep original exact label like "3. अतिरिक्त Additional"
+    return clean(text);
   }
   return null;
 }
 
 // ===============================
 // CUSTOM JSON FORMATTER
-// Keeps subjects compact
 // ===============================
 function formatStudent(student, indent = "    ") {
   const lines = [];
@@ -148,17 +152,12 @@ function saveCustomJSON(file, data) {
   fs.writeFileSync(file, lines.join("\n"), "utf8");
 }
 
-function saveProgress(progress) {
-  fs.writeFileSync(PROGRESS_FILE, JSON.stringify(progress, null, 2));
-}
-
-function loadProgress() {
-  if (!fs.existsSync(PROGRESS_FILE)) return null;
-  try {
-    return JSON.parse(fs.readFileSync(PROGRESS_FILE, "utf8"));
-  } catch {
-    return null;
+function countTotalStudentsSaved(fullResults) {
+  let total = 0;
+  for (const rollCode of Object.keys(fullResults)) {
+    total += Object.keys(fullResults[rollCode] || {}).length;
   }
+  return total;
 }
 
 // ===============================
@@ -178,13 +177,8 @@ function parseSubjects($) {
     const row1 = [];
     const row2 = [];
 
-    $(rows[0]).find("td,th").each((_, cell) => {
-      row1.push(clean($(cell).text()));
-    });
-
-    $(rows[1]).find("td,th").each((_, cell) => {
-      row2.push(clean($(cell).text()));
-    });
+    $(rows[0]).find("td,th").each((_, cell) => row1.push(clean($(cell).text())));
+    $(rows[1]).find("td,th").each((_, cell) => row2.push(clean($(cell).text())));
 
     const row1Text = row1.join(" ").toLowerCase();
     const row2Text = row2.join(" ").toLowerCase();
@@ -200,38 +194,24 @@ function parseSubjects($) {
       row2Text.includes("pr.");
 
     if (!isMarksTable) return;
-
     marksTableFound = true;
 
     for (let i = 2; i < rows.length; i++) {
       const row = rows[i];
       const cells = [];
-
-      $(row).find("td,th").each((_, cell) => {
-        cells.push(clean($(cell).text()));
-      });
-
+      $(row).find("td,th").each((_, cell) => cells.push(clean($(cell).text())));
       if (!cells.length) continue;
 
-      // Section row
       if (cells.length === 1) {
         const extraLabel = detectAdditionalSection(cells[0]);
-        currentAdditionalSection = extraLabel; // only save Additional sections
+        currentAdditionalSection = extraLabel;
         continue;
       }
 
       if (cells.length !== 8) continue;
 
       const subjectName = clean(cells[0]);
-
-      if (
-        !subjectName ||
-        subjectName.toLowerCase() === "subject" ||
-        subjectName.toLowerCase() === "th." ||
-        subjectName.toLowerCase() === "pr."
-      ) {
-        continue;
-      }
+      if (!subjectName) continue;
 
       const obj = {
         subject: subjectName,
@@ -249,10 +229,7 @@ function parseSubjects($) {
       if (regulationTheory !== "") obj.regulationTheory = regulationTheory;
       if (regulationPractical !== "") obj.regulationPractical = regulationPractical;
 
-      // ONLY save extra if Additional section
-      if (currentAdditionalSection) {
-        obj.extra = currentAdditionalSection;
-      }
+      if (currentAdditionalSection) obj.extra = currentAdditionalSection;
 
       subjects.push(obj);
     }
@@ -269,14 +246,10 @@ function extractKeyValues($) {
 
   $("table tr").each((_, row) => {
     const tds = $(row).find("td");
-
     if (tds.length === 2) {
       const key = clean($(tds[0]).text()).replace(/:$/, "");
       const value = clean($(tds[1]).text());
-
-      if (key && value) {
-        data[key] = value;
-      }
+      if (key && value) data[key] = value;
     }
   });
 
@@ -308,7 +281,6 @@ function extractFullResult(html) {
 // ===============================
 async function getSessionData() {
   const res = await client.get(BASE_URL);
-
   const html = res.data;
   const $ = cheerio.load(html);
 
@@ -377,8 +349,8 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
     }
 
     return { valid: false };
-  } catch (err) {
-    return { valid: false, error: err.message };
+  } catch {
+    return { valid: false };
   }
 }
 
@@ -392,59 +364,52 @@ function loadValidRollCodes() {
     .sort((a, b) => Number(a) - Number(b));
 }
 
-function countTotalStudentsSaved(fullResults) {
-  let total = 0;
-  for (const rollCode of Object.keys(fullResults)) {
-    total += Object.keys(fullResults[rollCode] || {}).length;
-  }
-  return total;
-}
-
 // ===============================
 // MAIN
 // ===============================
 (async () => {
-  const validRollCodes = loadValidRollCodes();
+  const allValidRollCodes = loadValidRollCodes();
 
-  if (!validRollCodes.length) {
+  if (!allValidRollCodes.length) {
     console.log(`❌ No valid roll codes found in ${VALID_ROLL_CODE_FILE}`);
     return;
   }
 
-  const fullResults = loadJSON(OUTPUT_FILE, {});
-  const progress = loadProgress();
+  const selectedRollCodes = allValidRollCodes.slice(START_INDEX, END_INDEX + 1);
 
-  let startRollCodeIndex = 0;
-  let startRollNo = ROLLNO_START;
-
-  if (progress && progress.currentRollCode) {
-    const idx = validRollCodes.indexOf(String(progress.currentRollCode));
-    if (idx !== -1) {
-      startRollCodeIndex = idx;
-      startRollNo = progress.currentRollNo || ROLLNO_START;
-    }
+  if (!selectedRollCodes.length) {
+    console.log(`❌ No roll codes found in selected split range ${START_INDEX}-${END_INDEX}`);
+    return;
   }
 
-  saveCustomJSON(OUTPUT_FILE, fullResults);
-
+  const fullResults = loadJSON(OUTPUT_FILE, {});
   let totalStudentsSaved = countTotalStudentsSaved(fullResults);
   let unsavedValidCount = 0;
 
-  console.log(`🚀 FULL RESULT SCRAPER STARTED`);
-  console.log(`📚 Total valid roll codes: ${validRollCodes.length}`);
-  console.log(`📦 Already saved students: ${totalStudentsSaved}`);
+  console.log(`🚀 SPLIT FULL RESULT SCRAPER STARTED`);
+  console.log(`📚 Total valid roll codes available: ${allValidRollCodes.length}`);
+  console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
+  console.log(`📦 Roll codes in this split: ${selectedRollCodes.length}`);
+  console.log(`📦 Already saved students in JSON: ${totalStudentsSaved}`);
 
-  for (let rcIndex = startRollCodeIndex; rcIndex < validRollCodes.length; rcIndex++) {
-    const rollCode = validRollCodes[rcIndex];
+  for (let rcIndex = 0; rcIndex < selectedRollCodes.length; rcIndex++) {
+    const rollCode = selectedRollCodes[rcIndex];
+
     if (!fullResults[rollCode]) fullResults[rollCode] = {};
 
-    let currentRollNo = rcIndex === startRollCodeIndex ? startRollNo : ROLLNO_START;
-    let foundInThisRollCode = Object.keys(fullResults[rollCode]).length;
+    const alreadySavedForRollCode = Object.keys(fullResults[rollCode]).length;
+    if (alreadySavedForRollCode > 0) {
+      console.log(`⏭️ Skipping ${rollCode} (already has ${alreadySavedForRollCode} students saved)`);
+      continue;
+    }
+
+    let currentRollNo = ROLLNO_START;
+    let foundInThisRollCode = 0;
     let continuousFail = 0;
     let checkedInThisRollCode = 0;
     let savedInThisRollCode = 0;
 
-    console.log(`\n▶️ Started Roll Code ${rollCode} from ${currentRollNo}`);
+    console.log(`▶️ Checking Roll Code ${rollCode}`);
 
     while (currentRollNo <= ROLLNO_END) {
       const sessionData = await getSessionData();
@@ -454,8 +419,6 @@ function countTotalStudentsSaved(fullResults) {
       for (let rn = currentRollNo; rn <= batchEnd; rn++) {
         batchRollNos.push(rn);
       }
-
-      console.log(`🔎 Checking ${rollCode}: ${batchRollNos[0]} → ${batchRollNos[batchRollNos.length - 1]}`);
 
       for (let i = 0; i < batchRollNos.length; i += CONCURRENCY) {
         const chunk = batchRollNos.slice(i, i + CONCURRENCY);
@@ -479,43 +442,27 @@ function countTotalStudentsSaved(fullResults) {
               totalStudentsSaved++;
               foundInThisRollCode++;
               savedInThisRollCode++;
-
-              console.log(`✅ Found ${rollCode}-${rn} | ${result.data.studentName} | Total Saved: ${totalStudentsSaved}`);
             }
           } else {
             continuousFail++;
           }
 
-          // Skip if first 100 checked and still nothing found
-          if (
-            foundInThisRollCode === 0 &&
-            checkedInThisRollCode >= FIRST_CHECK_LIMIT
-          ) {
+          if (foundInThisRollCode === 0 && checkedInThisRollCode >= FIRST_CHECK_LIMIT) {
             console.log(`⏭️ Skipped ${rollCode} (No student found in first ${FIRST_CHECK_LIMIT})`);
             currentRollNo = ROLLNO_END + 1;
             break;
           }
 
-          // Skip if already found students and then continuous fail
-          if (
-            foundInThisRollCode > 0 &&
-            continuousFail >= CONTINUOUS_FAIL_LIMIT
-          ) {
+          if (foundInThisRollCode > 0 && continuousFail >= CONTINUOUS_FAIL_LIMIT) {
             console.log(`⏹️ Stopped ${rollCode} after ${CONTINUOUS_FAIL_LIMIT} continuous fail`);
             currentRollNo = ROLLNO_END + 1;
             break;
           }
         }
 
-        saveProgress({
-          mode: "full-result-production",
-          currentRollCode: rollCode,
-          currentRollNo: chunk[chunk.length - 1] + 1
-        });
-
         if (unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
           saveCustomJSON(OUTPUT_FILE, fullResults);
-          console.log(`💾 Saved batch | Roll Code ${rollCode} | New Saved Here: ${savedInThisRollCode} | Total Saved: ${totalStudentsSaved}`);
+          console.log(`💾 Progress Saved | Total Saved: ${totalStudentsSaved}`);
           unsavedValidCount = 0;
         }
 
@@ -523,29 +470,19 @@ function countTotalStudentsSaved(fullResults) {
       }
 
       if (currentRollNo > ROLLNO_END) break;
-
       currentRollNo = batchEnd + 1;
     }
 
-    if (unsavedValidCount > 0) {
+    if (savedInThisRollCode > 0) {
       saveCustomJSON(OUTPUT_FILE, fullResults);
-      console.log(`💾 Saved ${rollCode} | Students in this roll code: ${savedInThisRollCode} | Total Saved: ${totalStudentsSaved}`);
+      console.log(`✅ Saved ${savedInThisRollCode} students from ${rollCode} | Total Saved: ${totalStudentsSaved}`);
       unsavedValidCount = 0;
     } else {
-      console.log(`💾 Finished ${rollCode} | Students in this roll code: ${savedInThisRollCode} | Total Saved: ${totalStudentsSaved}`);
+      console.log(`⚠️ No students saved from ${rollCode}`);
     }
-
-    // move progress to next roll code
-    saveProgress({
-      mode: "full-result-production",
-      currentRollCode: validRollCodes[rcIndex + 1] || rollCode,
-      currentRollNo: ROLLNO_START
-    });
   }
 
   saveCustomJSON(OUTPUT_FILE, fullResults);
 
-  console.log(`\n🎉 SCRAPING COMPLETED`);
-  console.log(`📊 Total students saved: ${totalStudentsSaved}`);
-  console.log(`📁 Output: ${OUTPUT_FILE}`);
+  console.log(`🎉 SPLIT COMPLETED | Range ${START_INDEX}-${END_INDEX} | Total Saved: ${totalStudentsSaved}`);
 })();
