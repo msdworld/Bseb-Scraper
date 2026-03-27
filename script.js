@@ -20,8 +20,8 @@ const FIRST_CHECK_LIMIT = 100;
 const CONTINUOUS_FAIL_LIMIT = 20;
 
 // Speed
-const CONCURRENCY = 500;
-const BATCH_SIZE = 1000;
+const CONCURRENCY = 1000;
+const BATCH_SIZE = 4000;
 const REQUEST_TIMEOUT = 5000;
 
 // Save
@@ -31,7 +31,7 @@ const SAVE_EVERY_VALID_RESULTS = 100; // changed from 20 to 100
 // SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
 const START_INDEX = 0;
-const END_INDEX = 2000;
+const END_INDEX = 2500;
 
 // ===============================
 // AXIOS CLIENT
