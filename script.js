@@ -20,8 +20,8 @@ const FIRST_CHECK_LIMIT = 100;
 const CONTINUOUS_FAIL_LIMIT = 20;
 
 // Speed
-const CONCURRENCY = 5;
-const BATCH_SIZE = 20;
+const CONCURRENCY = 50;
+const BATCH_SIZE = 200;
 const REQUEST_TIMEOUT = 5000;
 
 // Save
@@ -30,7 +30,7 @@ const SAVE_EVERY_VALID_RESULTS = 100; // changed from 20 to 100
 // ===============================
 // SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
-const START_INDEX = 109;
+const START_INDEX = 129;
 const END_INDEX = 150;
 
 // ===============================
