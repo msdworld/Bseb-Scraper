@@ -1,125 +1,134 @@
-const axios = require("axios");
-const cheerio = require("cheerio");
 const fs = require("fs");
+const cheerio = require("cheerio");
 
 // ===============================
 // CONFIG
 // ===============================
-const URL = "https://interbiharboard.com/";
-const REQUEST_TIMEOUT = 15000;
+const FILE = "debug-result.html";
 
 // ===============================
-// AXIOS CLIENT
+// HELPERS
 // ===============================
-const client = axios.create({
-  timeout: REQUEST_TIMEOUT,
-  maxRedirects: 5,
-  validateStatus: () => true,
-  headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept":
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1"
-  }
-});
-
 function clean(txt) {
   return (txt || "").replace(/\s+/g, " ").trim();
 }
 
-(async () => {
-  try {
-    console.log("🚀 STEP 1: Fetching form page...");
-    const res = await client.get(URL);
-
-    console.log("📌 GET Status:", res.status);
-
-    const html = String(res.data || "");
-    fs.writeFileSync("debug-form.html", html, "utf8");
-
-    const $ = cheerio.load(html);
-
-    // ===============================
-    // Hidden fields
-    // ===============================
-    const token = $('input[name="__RequestVerificationToken"]').val() || "";
-
-    console.log("\n✅ Hidden fields:");
-    console.log({
-      RequestVerificationToken: !!token
-    });
-
-    // ===============================
-    // Search raw HTML for captcha-related strings
-    // ===============================
-    console.log("\n=========== SEARCHING CAPTCHA SCRIPT ===========\n");
-
-    const captchaMatches = html.match(/.{0,160}(captcha|generatedCaptcha|refreshCaptcha|math|sum|total|operand|security).{0,240}/gi);
-
-    if (captchaMatches && captchaMatches.length) {
-      captchaMatches.forEach((line, i) => {
-        console.log(`\n[${i + 1}] ${line}\n`);
-      });
-    } else {
-      console.log("❌ No captcha-related text found in raw HTML");
-    }
-
-    // ===============================
-    // Print all script tags
-    // ===============================
-    console.log("\n=========== SCRIPT TAGS ===========\n");
-
-    $("script").each((i, el) => {
-      const src = $(el).attr("src") || "";
-      const inline = clean($(el).html() || "");
-
-      console.log(`\n[SCRIPT ${i + 1}]`);
-      console.log("src:", src || "(inline)");
-
-      if (inline) {
-        console.log(inline.slice(0, 1500)); // only preview
-        console.log("---- END PREVIEW ----");
-      }
-    });
-
-    // ===============================
-    // Print captcha-related elements
-    // ===============================
-    console.log("\n=========== CAPTCHA ELEMENTS ===========\n");
-
-    $("*").each((i, el) => {
-      const id = ($(el).attr("id") || "").toLowerCase();
-      const name = ($(el).attr("name") || "").toLowerCase();
-      const cls = ($(el).attr("class") || "").toLowerCase();
-      const text = clean($(el).text() || "");
-
-      const joined = `${id} ${name} ${cls} ${text}`.toLowerCase();
-
-      if (
-        joined.includes("captcha") ||
-        joined.includes("security") ||
-        joined.includes("total of") ||
-        joined.includes("sum")
-      ) {
-        console.log({
-          tag: el.tagName,
-          id: $(el).attr("id") || "",
-          name: $(el).attr("name") || "",
-          class: $(el).attr("class") || "",
-          text: text.slice(0, 200)
-        });
-      }
-    });
-
-    console.log("\n💾 Saved: debug-form.html");
-    console.log("✅ Done");
-  } catch (err) {
-    console.error("❌ ERROR:", err.message);
+// ===============================
+// MAIN
+// ===============================
+(() => {
+  if (!fs.existsSync(FILE)) {
+    console.log(`❌ ${FILE} not found`);
     process.exit(1);
   }
+
+  const html = fs.readFileSync(FILE, "utf8");
+  const $ = cheerio.load(html);
+
+  console.log("🚀 INSPECTING RETURNED RESULT PAGE...");
+  console.log(`📄 File: ${FILE}`);
+
+  // ===============================
+  // PAGE TITLE
+  // ===============================
+  console.log("\n==============================");
+  console.log("PAGE TITLE");
+  console.log("==============================");
+  console.log(clean($("title").text()) || "(no title)");
+
+  // ===============================
+  // FORMS
+  // ===============================
+  console.log("\n==============================");
+  console.log("FORMS FOUND");
+  console.log("==============================");
+
+  $("form").each((i, form) => {
+    const action = $(form).attr("action") || "";
+    const method = ($(form).attr("method") || "GET").toUpperCase();
+    const id = $(form).attr("id") || "";
+    const name = $(form).attr("name") || "";
+
+    console.log(`\n[FORM ${i + 1}]`);
+    console.log(`action: ${action}`);
+    console.log(`method: ${method}`);
+    console.log(`id: ${id}`);
+    console.log(`name: ${name}`);
+  });
+
+  // ===============================
+  // LINKS
+  // ===============================
+  console.log("\n==============================");
+  console.log("LINKS / ROUTES");
+  console.log("==============================");
+
+  $("a").each((i, a) => {
+    const href = $(a).attr("href") || "";
+    const text = clean($(a).text());
+
+    if (href) {
+      console.log(`${i + 1}. href="${href}" text="${text}"`);
+    }
+  });
+
+  // ===============================
+  // IFRAME / EMBED / OBJECT
+  // ===============================
+  console.log("\n==============================");
+  console.log("IFRAME / EMBED / OBJECT");
+  console.log("==============================");
+
+  $("iframe, embed, object").each((i, el) => {
+    const tag = el.tagName;
+    const src = $(el).attr("src") || $(el).attr("data") || "";
+    console.log(`${i + 1}. <${tag}> src/data="${src}"`);
+  });
+
+  // ===============================
+  // SCRIPT TAGS
+  // ===============================
+  console.log("\n==============================");
+  console.log("SCRIPT TAGS");
+  console.log("==============================");
+
+  $("script").each((i, el) => {
+    const src = $(el).attr("src") || "";
+    const inline = clean($(el).html() || "");
+
+    console.log(`\n[SCRIPT ${i + 1}]`);
+    console.log("src:", src || "(inline)");
+
+    if (inline) {
+      console.log(inline.slice(0, 1500));
+      console.log("---- END PREVIEW ----");
+    }
+  });
+
+  // ===============================
+  // SEARCH FOR RESULT / REDIRECT / FETCH / AJAX
+  // ===============================
+  console.log("\n==============================");
+  console.log("SEARCHING IMPORTANT KEYWORDS");
+  console.log("==============================");
+
+  const matches = html.match(/.{0,180}(window\.location|location\.href|location\.replace|fetch\(|axios|\/Result\/[A-Za-z0-9/_-]+|Student's Name|Roll Code|Aggregate Marks|captcha|Incorrect CAPTCHA|View Result).{0,220}/gi);
+
+  if (matches && matches.length) {
+    matches.forEach((line, i) => {
+      console.log(`\n[${i + 1}] ${line}\n`);
+    });
+  } else {
+    console.log("❌ No important route/result text found");
+  }
+
+  // ===============================
+  // TEXT SNIPPET
+  // ===============================
+  console.log("\n==============================");
+  console.log("VISIBLE TEXT PREVIEW");
+  console.log("==============================");
+
+  const bodyText = clean($("body").text()).slice(0, 3000);
+  console.log(bodyText || "(no visible text)");
 })();
