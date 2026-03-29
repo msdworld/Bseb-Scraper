@@ -17,4 +17,4 @@ jobs:
           node-version: 20
 
       - name: Run prefix counter
-        run: node scripts/count-prefixes.js
+        run: node script.js
