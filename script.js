@@ -5,8 +5,8 @@ const fs = require("fs");
 // ===============================
 // CONFIG
 // ===============================
-const BASE_URL = "https://interbiharboard.com/Default.html";
-const POST_URL = "https://interbiharboard.com/Result.aspx";
+const BASE_URL = "https://interbiharboard.com/";
+const POST_URL = "https://interbiharboard.com/Result/GetResult";
 
 // 👉 PUT ONE REAL VALID STUDENT HERE
 const TEST_ROLL_CODE = "42104";
