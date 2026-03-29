@@ -8,5 +8,8 @@
   "dependencies": {
     "axios": "^1.7.2",
     "cheerio": "^1.0.0"
+    npm init -y
+npm install playwright axios cheerio
+npx playwright install chromium
   }
 }
