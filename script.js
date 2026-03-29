@@ -134,7 +134,7 @@ try {
         timeout: 60000
       });
 
-      await page.waitForSelector("#mobile", { timeout: 30000 });
+      await page.waitForSelector("#rollcode", { timeout: 30000 });
     }
     await page.goto("http://interbiharboard.com/Default.html", {
       waitUntil: "domcontentloaded",
@@ -147,14 +147,14 @@ try {
 // =========================
     async function fillAndSubmit(rollCode, rollNumber) {
       try {
-        await page.waitForSelector("#mobile", { timeout: 15000 });
+        await page.waitForSelector("#rollcode", { timeout: 15000 });
 
         // Clear inputs properly
-        await page.$eval("#mobile", el => { el.value = ""; });
-        await page.$eval("#password", el => { el.value = ""; });
+        await page.$eval("#rollcode", el => { el.value = ""; });
+        await page.$eval("#rollno", el => { el.value = ""; });
 
-        await page.type("#mobile", String(rollCode), { delay: 1 });
-        await page.type("#password", String(rollNumber), { delay: 1 });
+        await page.type("#rollcode", String(rollCode), { delay: 1 });
+        await page.type("#rollno", String(rollNumber), { delay: 1 });
 
         // Auto fill captcha from page
         await page.evaluate(() => {
@@ -233,8 +233,8 @@ try {
       }
     }
     // Fill Roll Code
-    await page.waitForSelector("#mobile", { timeout: 30000 });
-    await page.type("#mobile", rollCode, { delay: 50 });
+    await page.waitForSelector("#rollcode", { timeout: 30000 });
+    await page.type("#rollcodee", rollCode, { delay: 50 });
 
     // =========================
     // START
