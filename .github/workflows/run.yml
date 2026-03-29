@@ -1,57 +1,20 @@
-name: BSEB Full Result Scraper
+name: Count Roll Code Prefixes
 
 on:
   workflow_dispatch:
 
 jobs:
-  scrape:
+  count-prefixes:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
-
     steps:
-      - name: Checkout Repo
+      - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Run Script
-        run: node script.js
-
-      - name: Show Saved Files
-        if: always()
-        run: |
-          echo "===== FILE LIST ====="
-          ls -la
-          echo "===== FULL RESULT JSON ====="
-          cat bseb-12th-full-result-2026.json || echo "Full result JSON not found"
-          echo "===== PROGRESS FILE ====="
-          cat progress.txt || echo "Progress file not found"
-
-      - name: Commit and Push Results
-        if: always()
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add bseb-12th-full-result-2026.json progress.txt
-          git commit -m "Update BSEB full result data" || echo "No changes to commit"
-          git pull --rebase origin main || true
-          git push
-
-      - name: Upload Result Files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bseb-full-result-data
-          path: |
-            bseb-12th-full-result-2026.json
-            progress.txt
+      - name: Run prefix counter
+        run: node scripts/count-prefixes.js
