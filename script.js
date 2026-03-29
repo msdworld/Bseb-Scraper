@@ -1,212 +1,208 @@
-const axios = require("axios");
-const cheerio = require("cheerio");
+const { chromium } = require("playwright");
 const fs = require("fs");
+const path = require("path");
 
 // ===============================
 // CONFIG
 // ===============================
-const BASE_URL = "https://interbiharboard.com/";
-const POST_URL = "https://interbiharboard.com/Result/GetResult";
+const START_URL = "https://interbiharboard.com/";
+const OUT_DIR = "debug-capture";
 
+// Put one known valid student here
 const TEST_ROLL_CODE = "42104";
 const TEST_ROLL_NO = "26010021";
-const TEST_CAPTCHA = "123456";
-
-const REQUEST_TIMEOUT = 15000;
-
-// ===============================
-// AXIOS CLIENT
-// ===============================
-const client = axios.create({
-  timeout: REQUEST_TIMEOUT,
-  maxRedirects: 5,
-  validateStatus: () => true,
-  headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept":
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1"
-  }
-});
 
 // ===============================
 // HELPERS
 // ===============================
-function clean(txt) {
-  return (txt || "").replace(/\s+/g, " ").trim();
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-function getHidden($, name) {
-  return clean($(`input[name="${name}"]`).val() || "");
+function clean(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
 }
 
-// ===============================
-// FETCH FORM PAGE
-// ===============================
-async function getSessionData() {
-  console.log("🚀 STEP 1: Fetching form page...");
-
-  const res = await client.get(BASE_URL);
-  console.log("📌 GET Status:", res.status);
-
-  const html = String(res.data || "");
-  fs.writeFileSync("debug-default.html", html, "utf8");
-
-  const $ = cheerio.load(html);
-
-  const rawCookies = res.headers["set-cookie"] || [];
-  const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
-
-  const requestVerificationToken = getHidden($, "__RequestVerificationToken");
-
-  console.log("✅ Hidden fields:");
-  console.log({
-    RequestVerificationToken: !!requestVerificationToken
-  });
-
-  return {
-    cookieHeader,
-    requestVerificationToken,
-    html
-  };
+function safeName(str) {
+  return String(str).replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
-// ===============================
-// POST ONE RESULT
-// ===============================
-async function fetchStudentResult(rollCode, rollNo, sessionData) {
-  console.log("\n🚀 STEP 2: Sending POST request...");
-
-  const payload = new URLSearchParams();
-  payload.append("rollcode", String(rollCode));
-  payload.append("rollno", String(rollNo));
-  payload.append("captcha", TEST_CAPTCHA);
-  payload.append("__RequestVerificationToken", sessionData.requestVerificationToken);
-
-  const res = await client.post(POST_URL, payload.toString(), {
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Cookie": sessionData.cookieHeader,
-      "Referer": BASE_URL,
-      "Origin": "https://interbiharboard.com"
-    }
-  });
-
-  console.log("📌 POST Status:", res.status);
-  console.log("📌 Final URL:", POST_URL);
-
-  const html = String(res.data || "");
-  fs.writeFileSync("debug-result.html", html, "utf8");
-
-  return {
-    status: res.status,
-    headers: res.headers,
-    html
-  };
+function saveText(file, content) {
+  fs.writeFileSync(file, content, "utf8");
 }
 
-// ===============================
-// INSPECT RETURNED PAGE
-// ===============================
-function inspectReturnedPage(html) {
-  const $ = cheerio.load(html);
-
-  console.log("\n==============================");
-  console.log("RETURNED PAGE TITLE");
-  console.log("==============================");
-  console.log(clean($("title").text()) || "(no title)");
-
-  console.log("\n==============================");
-  console.log("RETURNED FORMS");
-  console.log("==============================");
-
-  $("form").each((i, form) => {
-    const action = $(form).attr("action") || "";
-    const method = ($(form).attr("method") || "GET").toUpperCase();
-    const id = $(form).attr("id") || "";
-    const name = $(form).attr("name") || "";
-
-    console.log(`\n[FORM ${i + 1}]`);
-    console.log(`action: ${action}`);
-    console.log(`method: ${method}`);
-    console.log(`id: ${id}`);
-    console.log(`name: ${name}`);
-  });
-
-  console.log("\n==============================");
-  console.log("LINKS / ROUTES");
-  console.log("==============================");
-
-  $("a").each((i, a) => {
-    const href = $(a).attr("href") || "";
-    const text = clean($(a).text());
-
-    if (href) {
-      console.log(`${i + 1}. href="${href}" text="${text}"`);
-    }
-  });
-
-  console.log("\n==============================");
-  console.log("SCRIPT TAGS");
-  console.log("==============================");
-
-  $("script").each((i, el) => {
-    const src = $(el).attr("src") || "";
-    const inline = clean($(el).html() || "");
-
-    console.log(`\n[SCRIPT ${i + 1}]`);
-    console.log("src:", src || "(inline)");
-
-    if (inline) {
-      console.log(inline.slice(0, 1200));
-      console.log("---- END PREVIEW ----");
-    }
-  });
-
-  console.log("\n==============================");
-  console.log("IMPORTANT TEXT MATCHES");
-  console.log("==============================");
-
-  const matches = html.match(/.{0,180}(window\.location|location\.href|location\.replace|fetch\(|axios|\/Result\/[A-Za-z0-9/_-]+|Student's Name|Roll Code|Aggregate Marks|captcha|Incorrect CAPTCHA|View Result|Please Enter Correct CAPTCHA).{0,220}/gi);
-
-  if (matches && matches.length) {
-    matches.forEach((line, i) => {
-      console.log(`\n[${i + 1}] ${line}\n`);
-    });
-  } else {
-    console.log("❌ No important route/result text found");
-  }
-
-  console.log("\n==============================");
-  console.log("VISIBLE TEXT PREVIEW");
-  console.log("==============================");
-
-  const bodyText = clean($("body").text()).slice(0, 3000);
-  console.log(bodyText || "(no visible text)");
-}
-
-// ===============================
-// MAIN
-// ===============================
 (async () => {
-  try {
-    const sessionData = await getSessionData();
-    const response = await fetchStudentResult(TEST_ROLL_CODE, TEST_ROLL_NO, sessionData);
+  ensureDir(OUT_DIR);
 
-    console.log("\n💾 Saved files:");
-    console.log("- debug-default.html");
-    console.log("- debug-result.html");
+  const browser = await chromium.launch({
+    headless: false // IMPORTANT: keep false so you can manually enter captcha
+  });
 
-    inspectReturnedPage(response.html);
+  const context = await browser.newContext({
+    viewport: { width: 1400, height: 900 }
+  });
 
-    console.log("\n✅ DONE");
-  } catch (err) {
-    console.error("\n❌ ERROR:", err.message);
-    process.exit(1);
-  }
+  const page = await context.newPage();
+
+  const requestLog = [];
+  const responseLog = [];
+
+  // ===============================
+  // NETWORK LOGGING
+  // ===============================
+  page.on("request", async (req) => {
+    const url = req.url();
+    const method = req.method();
+
+    if (url.includes("interbiharboard.com")) {
+      const entry = {
+        type: "request",
+        time: new Date().toISOString(),
+        method,
+        url,
+        headers: req.headers(),
+        postData: req.postData() || null
+      };
+
+      requestLog.push(entry);
+
+      console.log(`➡️ ${method} ${url}`);
+
+      if (entry.postData) {
+        console.log("   POST DATA:", entry.postData.slice(0, 500));
+      }
+    }
+  });
+
+  page.on("response", async (res) => {
+    try {
+      const url = res.url();
+      const status = res.status();
+
+      if (url.includes("interbiharboard.com")) {
+        let bodyPreview = "";
+
+        const contentType = res.headers()["content-type"] || "";
+        if (
+          contentType.includes("text/html") ||
+          contentType.includes("application/json") ||
+          contentType.includes("text/plain")
+        ) {
+          try {
+            const txt = await res.text();
+            bodyPreview = clean(txt).slice(0, 3000);
+          } catch {}
+        }
+
+        const entry = {
+          type: "response",
+          time: new Date().toISOString(),
+          status,
+          url,
+          headers: res.headers(),
+          bodyPreview
+        };
+
+        responseLog.push(entry);
+
+        console.log(`⬅️ ${status} ${url}`);
+      }
+    } catch (e) {
+      console.log("Response log error:", e.message);
+    }
+  });
+
+  // ===============================
+  // OPEN PAGE
+  // ===============================
+  console.log("🚀 Opening page...");
+  await page.goto(START_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+
+  await page.waitForTimeout(2000);
+
+  // Save initial HTML
+  saveText(path.join(OUT_DIR, "01-default-page.html"), await page.content());
+
+  console.log("✅ Page opened");
+  console.log("📍 Current URL:", page.url());
+
+  // ===============================
+  // FILL FORM
+  // ===============================
+  await page.fill('input[name="rollcode"]', TEST_ROLL_CODE);
+  await page.fill('input[name="rollno"]', TEST_ROLL_NO);
+
+  console.log("\n======================================");
+  console.log("MANUAL STEP REQUIRED");
+  console.log("======================================");
+  console.log("1. Look at the CAPTCHA shown in browser");
+  console.log("2. Type it manually into the captcha box");
+  console.log("3. Then press ENTER here in terminal");
+  console.log("======================================\n");
+
+  process.stdin.resume();
+  await new Promise((resolve) => {
+    process.stdin.once("data", () => resolve());
+  });
+
+  // ===============================
+  // SUBMIT FORM
+  // ===============================
+  console.log("🚀 Submitting form...");
+
+  await Promise.all([
+    page.waitForLoadState("domcontentloaded").catch(() => {}),
+    page.click('button[type="submit"]')
+  ]);
+
+  await page.waitForTimeout(5000);
+
+  console.log("📍 Final URL after submit:", page.url());
+
+  // Save final HTML
+  saveText(path.join(OUT_DIR, "02-after-submit.html"), await page.content());
+
+  // Save screenshot
+  await page.screenshot({
+    path: path.join(OUT_DIR, "final-page.png"),
+    fullPage: true
+  });
+
+  // Save cookies
+  const cookies = await context.cookies();
+  saveText(path.join(OUT_DIR, "cookies.json"), JSON.stringify(cookies, null, 2));
+
+  // Save request/response logs
+  saveText(path.join(OUT_DIR, "requests.json"), JSON.stringify(requestLog, null, 2));
+  saveText(path.join(OUT_DIR, "responses.json"), JSON.stringify(responseLog, null, 2));
+
+  // Save summary
+  const summary = {
+    startUrl: START_URL,
+    finalUrl: page.url(),
+    requestCount: requestLog.length,
+    responseCount: responseLog.length,
+    capturedAt: new Date().toISOString()
+  };
+
+  saveText(path.join(OUT_DIR, "summary.json"), JSON.stringify(summary, null, 2));
+
+  console.log("\n✅ CAPTURE COMPLETE");
+  console.log(`📁 Saved folder: ${OUT_DIR}`);
+  console.log("Files:");
+  console.log("- 01-default-page.html");
+  console.log("- 02-after-submit.html");
+  console.log("- final-page.png");
+  console.log("- cookies.json");
+  console.log("- requests.json");
+  console.log("- responses.json");
+  console.log("- summary.json");
+
+  console.log("\n🔍 Most important things to inspect:");
+  console.log("1. summary.json");
+  console.log("2. requests.json");
+  console.log("3. responses.json");
+  console.log("4. 02-after-submit.html");
+
+  await browser.close();
 })();
