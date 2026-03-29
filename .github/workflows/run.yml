@@ -1,4 +1,4 @@
-name: BSEB 12th Prefix Scraper
+name: One Student Check
 
 on:
   workflow_dispatch:
@@ -7,9 +7,8 @@ permissions:
   contents: write
 
 jobs:
-  scrape:
+  check-one:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     steps:
       - name: Checkout repo
@@ -23,13 +22,7 @@ jobs:
       - name: Install dependencies
         run: npm install axios cheerio
 
-      - name: Run scraper
+      - name: Run one student check
         run: node script.js
 
-      - name: Commit results
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add results/
-          git diff --cached --quiet || git commit -m "Update BSEB 12th prefix results"
-          git push
+      
