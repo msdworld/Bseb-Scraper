@@ -21,12 +21,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Install Dependencies
         run: npm install
-
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium
 
       - name: Run Script
         run: node script.js
@@ -56,4 +54,3 @@ jobs:
           name: bseb-full-result-data
           path: |
             bseb-12th-full-result-2026.json
-          if-no-files-found: warn
