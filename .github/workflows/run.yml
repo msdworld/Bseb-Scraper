@@ -1,42 +1,59 @@
-name: Debug One Student (InterBiharBoard)
+name: BSEB Full Result Scraper
 
 on:
   workflow_dispatch:
 
 jobs:
-  debug:
+  scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 360
+
+    permissions:
+      contents: write
 
     steps:
-      - name: Checkout repo
+      - name: Checkout Repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: npm install
 
       - name: Install Playwright Chromium
         run: npx playwright install chromium
 
-      - name: Show files before run
-        run: ls -la
-
-      - name: Run debug script
+      - name: Run Script
         run: node script.js
 
-      - name: Upload debug/output files
+      - name: Show Saved Files
+        if: always()
+        run: |
+          echo "===== FILE LIST ====="
+          ls -la
+          echo "===== FULL RESULT JSON ====="
+          cat bseb-12th-full-result-2026.json || echo "Full result JSON not found"
+
+      - name: Commit and Push Results
+        if: always()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add bseb-12th-full-result-2026.json
+          git commit -m "Update BSEB full result data" || echo "No changes to commit"
+          git pull --rebase origin main || true
+          git push
+
+      - name: Upload Result Files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: debug-files
+          name: bseb-full-result-data
           path: |
-            *.html
-            *.json
-            *.txt
-            *.log
+            bseb-12th-full-result-2026.json
           if-no-files-found: warn
