@@ -19,8 +19,8 @@ const FIRST_CHECK_LIMIT = 100;
 const CONTINUOUS_FAIL_LIMIT = 20;
 
 // Speed (KEEP LOW FOR PLAYWRIGHT)
-const CONCURRENCY = 3;
-const BATCH_SIZE = 30;
+const CONCURRENCY = 50;
+const BATCH_SIZE = 200;
 
 // Save
 const SAVE_EVERY_VALID_RESULTS = 100;
@@ -28,8 +28,8 @@ const SAVE_EVERY_VALID_RESULTS = 100;
 // ===============================
 // SPLIT RANGE (CHANGE EACH RUN)
 // ===============================
-const START_INDEX = 129;
-const END_INDEX = 150;
+const START_INDEX = 100;
+const END_INDEX = 500;
 
 // ===============================
 // HELPERS
