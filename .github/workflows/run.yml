@@ -6,7 +6,6 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     permissions:
       contents: write
@@ -21,10 +20,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Install Dependencies
-        run: npm install
+        run: npm install axios cheerio
 
       - name: Run Script
         run: node script.js
@@ -52,5 +50,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bseb-full-result-data
-          path: |
-            bseb-12th-full-result-2026.json
+          path: bseb-12th-full-result-2026.json
