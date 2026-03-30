@@ -1,13 +1,13 @@
 {
-  "name": "bseb-direct-post-test",
+  "name": "bseb-scraper",
   "version": "1.0.0",
+  "description": "BSEB scraper debug tools",
   "main": "script.js",
   "scripts": {
     "start": "node script.js"
   },
   "dependencies": {
-    "axios": "^1.7.2",
+    "axios": "^1.7.9",
     "cheerio": "^1.0.0"
-    
   }
 }
