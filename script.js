@@ -1,14 +1,11 @@
-const axios = require("axios");
-const cheerio = require("cheerio");
 const fs = require("fs");
-const http = require("http");
-const https = require("https");
+const cheerio = require("cheerio");
+const { chromium } = require("playwright");
 
 // ===============================
 // CONFIG
 // ===============================
 const BASE_URL = "https://interbiharboard.com/";
-const POST_URL = "https://interbiharboard.com/Result/GetResult";
 
 const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
@@ -22,9 +19,8 @@ const FIRST_CHECK_LIMIT = 100;
 const CONTINUOUS_FAIL_LIMIT = 20;
 
 // Speed
-const CONCURRENCY = 500;
-const BATCH_SIZE = 2000;
-const REQUEST_TIMEOUT = 7000;
+const CONCURRENCY = 50; // browser mode me realistic
+const BATCH_SIZE = 200;
 
 // Save
 const SAVE_EVERY_VALID_RESULTS = 100;
@@ -33,47 +29,7 @@ const SAVE_EVERY_VALID_RESULTS = 100;
 // SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
 const START_INDEX = 1000;
-const END_INDEX = 1500;
-
-// ===============================
-// AXIOS CLIENT (OPTIMIZED)
-// ===============================
-const httpAgent = new http.Agent({
-  keepAlive: true,
-  maxSockets: 300,
-  maxFreeSockets: 100,
-  timeout: 30000,
-  keepAliveMsecs: 10000
-});
-
-const httpsAgent = new https.Agent({
-  keepAlive: true,
-  maxSockets: 300,
-  maxFreeSockets: 100,
-  timeout: 30000,
-  keepAliveMsecs: 10000
-});
-
-const client = axios.create({
-  timeout: REQUEST_TIMEOUT,
-  maxRedirects: 5,
-  validateStatus: () => true,
-  httpAgent,
-  httpsAgent,
-  headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept":
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Origin": "https://interbiharboard.com",
-    "Referer": "https://interbiharboard.com/"
-  }
-});
+const END_INDEX = 1100;
 
 // ===============================
 // HELPERS
@@ -89,10 +45,6 @@ function loadJSON(file, fallback = {}) {
   } catch {
     return fallback;
   }
-}
-
-function generateCaptcha() {
-  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 function detectAdditionalSection(text) {
@@ -295,78 +247,94 @@ function extractFullResult(html) {
 }
 
 // ===============================
-// SESSION FETCH
+// LOAD VALID ROLL CODES
 // ===============================
-async function getSessionData() {
-  const res = await client.get(BASE_URL);
-  const html = res.data;
-  const $ = cheerio.load(html);
-
-  const rawCookies = res.headers["set-cookie"] || [];
-  const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
-
-  const RequestVerificationToken =
-    $('input[name="__RequestVerificationToken"]').val()?.trim() || "";
-
-  if (!RequestVerificationToken) {
-    throw new Error("Could not fetch RequestVerificationToken");
-  }
-
-  return {
-    cookieHeader,
-    RequestVerificationToken
-  };
+function loadValidRollCodes() {
+  const raw = loadJSON(VALID_ROLL_CODE_FILE, {});
+  return Object.keys(raw)
+    .filter(code => /^\d+$/.test(code))
+    .sort((a, b) => Number(a) - Number(b));
 }
 
 // ===============================
-// FETCH ONE RESULT
+// FETCH ONE RESULT (REAL BROWSER)
 // ===============================
-async function fetchStudentResult(rollCode, rollNo, sessionData) {
+async function fetchStudentResult(browser, rollCode, rollNo) {
+  let page;
   try {
-    const payload = new URLSearchParams();
-    payload.append("rollcode", String(rollCode));
-    payload.append("rollno", String(rollNo));
-    payload.append("captcha", generateCaptcha());
-    payload.append("__RequestVerificationToken", sessionData.RequestVerificationToken);
+    const context = await browser.newContext();
+    page = await context.newPage();
 
-    const res = await client.post(POST_URL, payload.toString(), {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Cookie": sessionData.cookieHeader,
-        "Referer": BASE_URL,
-        "Origin": "https://interbiharboard.com"
-      }
+    await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+    await page.fill("#rollcode", String(rollCode));
+    await page.fill("#rollno", String(rollNo));
+
+    // Browser ke andar actual captcha read karo
+    const captchaValue = await page.evaluate(() => {
+      const el = document.getElementById("generatedCaptcha");
+      if (!el) return "";
+      return (
+        el.dataset.value ||
+        el.getAttribute("data-value") ||
+        el.textContent ||
+        ""
+      ).trim();
     });
 
-    const html = String(res.data || "");
-    const htmlLower = html.toLowerCase();
+    if (!captchaValue || captchaValue === "000000") {
+      await page.evaluate(() => {
+        if (typeof generateCaptcha === "function") generateCaptcha();
+      });
 
-    const looksLikeFormPage =
-      htmlLower.includes("enter roll code") &&
-      htmlLower.includes("enter roll number") &&
-      htmlLower.includes("enter captcha") &&
-      !htmlLower.includes("student's name") &&
-      !htmlLower.includes("school/college name");
+      await page.waitForTimeout(300);
 
-    if (
-      looksLikeFormPage ||
-      htmlLower.includes("incorrect captcha") ||
-      htmlLower.includes("please enter captcha") ||
-      htmlLower.includes("validation") ||
-      htmlLower.includes("token")
-    ) {
-      return { valid: false, retrySession: true };
+      const retryCaptcha = await page.evaluate(() => {
+        const el = document.getElementById("generatedCaptcha");
+        if (!el) return "";
+        return (
+          el.dataset.value ||
+          el.getAttribute("data-value") ||
+          el.textContent ||
+          ""
+        ).trim();
+      });
+
+      if (!retryCaptcha || retryCaptcha === "000000") {
+        await context.close();
+        return { valid: false };
+      }
+
+      await page.fill("#captchaInput", retryCaptcha);
+    } else {
+      await page.fill("#captchaInput", captchaValue);
     }
 
-    if (
-      htmlLower.includes("invalid") ||
-      htmlLower.includes("no record") ||
-      htmlLower.includes("not found")
-    ) {
+    await Promise.all([
+      page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {}),
+      page.click('button[type="submit"]')
+    ]);
+
+    await page.waitForTimeout(1500);
+
+    const html = await page.content();
+    const htmlLower = html.toLowerCase();
+    const finalUrl = page.url().toLowerCase();
+
+    const looksLikeResultPage =
+      finalUrl.includes("/result/showresult") ||
+      htmlLower.includes("student's name") ||
+      htmlLower.includes("school/college name") ||
+      htmlLower.includes("aggregate marks");
+
+    if (!looksLikeResultPage) {
+      await context.close();
       return { valid: false };
     }
 
     const result = extractFullResult(html);
+
+    await context.close();
 
     if (
       result.studentName &&
@@ -378,18 +346,11 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
 
     return { valid: false };
   } catch {
+    try {
+      if (page) await page.context().close();
+    } catch {}
     return { valid: false };
   }
-}
-
-// ===============================
-// LOAD VALID ROLL CODES
-// ===============================
-function loadValidRollCodes() {
-  const raw = loadJSON(VALID_ROLL_CODE_FILE, {});
-  return Object.keys(raw)
-    .filter(code => /^\d+$/.test(code))
-    .sort((a, b) => Number(a) - Number(b));
 }
 
 // ===============================
@@ -414,6 +375,11 @@ function loadValidRollCodes() {
   let totalStudentsSaved = countTotalStudentsSaved(fullResults);
   let unsavedValidCount = 0;
 
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+  });
+
   console.log(`🚀 SPLIT FULL RESULT SCRAPER STARTED`);
   console.log(`📚 Total valid roll codes available: ${allValidRollCodes.length}`);
   console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
@@ -437,17 +403,9 @@ function loadValidRollCodes() {
     let checkedInThisRollCode = 0;
     let savedInThisRollCode = 0;
 
-    let sessionData = await getSessionData();
-    let sessionUseCount = 0;
-
     console.log(`▶️ Checking Roll Code ${rollCode}`);
 
     while (currentRollNo <= ROLLNO_END) {
-      if (!sessionData || sessionUseCount >= 300) {
-        sessionData = await getSessionData();
-        sessionUseCount = 0;
-      }
-
       const batchEnd = Math.min(currentRollNo + BATCH_SIZE - 1, ROLLNO_END);
       const batchRollNos = [];
 
@@ -459,16 +417,8 @@ function loadValidRollCodes() {
         const chunk = batchRollNos.slice(i, i + CONCURRENCY);
 
         const results = await Promise.all(
-          chunk.map(rn => fetchStudentResult(rollCode, rn, sessionData))
+          chunk.map(rn => fetchStudentResult(browser, rollCode, rn))
         );
-
-        sessionUseCount += chunk.length;
-
-        const retrySessionCount = results.filter(r => r.retrySession).length;
-        if (retrySessionCount >= Math.ceil(chunk.length * 0.5)) {
-          sessionData = await getSessionData();
-          sessionUseCount = 0;
-        }
 
         for (let j = 0; j < chunk.length; j++) {
           const rn = chunk[j];
@@ -525,6 +475,7 @@ function loadValidRollCodes() {
     }
   }
 
+  await browser.close();
   saveCustomJSON(OUTPUT_FILE, fullResults);
 
   console.log(`🎉 SPLIT COMPLETED | Range ${START_INDEX}-${END_INDEX} | Total Saved: ${totalStudentsSaved}`);
