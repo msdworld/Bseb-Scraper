@@ -6,7 +6,6 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     permissions:
       contents: write
@@ -23,7 +22,7 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: npm install axios cheerio
+        run: npm install
 
       - name: Run Script
         run: node script.js
