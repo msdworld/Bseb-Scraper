@@ -1,10 +1,10 @@
-name: BSEB Full Result Scraper
+name: BSEB Debug One Student
 
 on:
   workflow_dispatch:
 
 jobs:
-  scrape:
+  debug:
     runs-on: ubuntu-latest
 
     permissions:
@@ -13,8 +13,6 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -24,31 +22,24 @@ jobs:
       - name: Install Dependencies
         run: npm install axios cheerio
 
-      - name: Run Script
+      - name: Run Debug Script
         run: node script.js
 
-      - name: Show Saved Files
+      - name: Show Debug Files
         if: always()
         run: |
           echo "===== FILE LIST ====="
           ls -la
-          echo "===== FULL RESULT JSON ====="
-          cat bseb-12th-full-result-2026.json || echo "Full result JSON not found"
+          echo "===== debug-default.html ====="
+          head -200 debug-default.html || echo "debug-default.html missing"
+          echo "===== debug-result.html ====="
+          head -200 debug-result.html || echo "debug-result.html missing"
 
-      - name: Commit and Push Results
-        if: always()
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add bseb-12th-full-result-2026.json
-          git commit -m "Update BSEB full result data" || echo "No changes to commit"
-          git pull --rebase origin main || true
-          git push
-
-      - name: Upload Result Files
+      - name: Upload Debug Files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseb-full-result-data
+          name: bseb-debug-files
           path: |
-            bseb-12th-full-result-2026.json
+            debug-default.html
+            debug-result.html
