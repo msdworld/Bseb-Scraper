@@ -23,10 +23,7 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Install Playwright Browser
-        run: npx playwright install chromium --with-deps
+        run: npm install axios cheerio
 
       - name: Run Script
         run: node script.js
@@ -38,13 +35,15 @@ jobs:
           ls -la
           echo "===== FULL RESULT JSON ====="
           cat bseb-12th-full-result-2026.json || echo "Full result JSON not found"
+          echo "===== PROGRESS FILE ====="
+          cat progress.txt || echo "Progress file not found"
 
       - name: Commit and Push Results
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add bseb-12th-full-result-2026.json
+          git add bseb-12th-full-result-2026.json progress.txt
           git commit -m "Update BSEB full result data" || echo "No changes to commit"
           git pull --rebase origin main || true
           git push
@@ -56,3 +55,4 @@ jobs:
           name: bseb-full-result-data
           path: |
             bseb-12th-full-result-2026.json
+            progress.txt
