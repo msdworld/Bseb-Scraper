@@ -1,11 +1,15 @@
-const { chromium } = require("playwright");
+const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
+const http = require("http");
+const https = require("https");
 
 // ===============================
 // CONFIG
 // ===============================
 const BASE_URL = "https://interbiharboard.com/";
+const FORM_URL = "https://interbiharboard.com/";
+const POST_URL = "https://interbiharboard.com/Result/GetResult";
 
 const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
@@ -14,28 +18,55 @@ const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
 const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
-// Skip logic
-const FIRST_CHECK_LIMIT = 100;
-const CONTINUOUS_FAIL_LIMIT = 20;
+// Skip logic (safer than before)
+const FIRST_CHECK_LIMIT = 200;
+const CONTINUOUS_FAIL_LIMIT = 50;
 
-// Speed (KEEP LOW FOR PLAYWRIGHT)
-const CONCURRENCY = 500;
+// Speed
+const CONCURRENCY = 500; // safer for this site, can try 30 later
 const BATCH_SIZE = 2000;
+const REQUEST_TIMEOUT = 12000;
 
 // Save
 const SAVE_EVERY_VALID_RESULTS = 100;
 
 // ===============================
-// SPLIT RANGE (CHANGE EACH RUN)
+// SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
 const START_INDEX = 500;
 const END_INDEX = 1000;
+
+// ===============================
+// AXIOS CLIENT
+// ===============================
+const client = axios.create({
+  timeout: REQUEST_TIMEOUT,
+  maxRedirects: 5,
+  validateStatus: () => true,
+  httpAgent: new http.Agent({ keepAlive: true, maxSockets: 100 }),
+  httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 100 }),
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept":
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1"
+  }
+});
 
 // ===============================
 // HELPERS
 // ===============================
 function clean(txt) {
   return (txt || "").replace(/\s+/g, " ").trim();
+}
+
+function generateCaptcha() {
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 function loadJSON(file, fallback = {}) {
@@ -159,9 +190,7 @@ function parseSubjects($) {
       row1Text.includes("pass marks") &&
       row1Text.includes("theory") &&
       row1Text.includes("practical") &&
-      row1Text.includes("subject total") &&
-      row2Text.includes("th.") &&
-      row2Text.includes("pr.");
+      row1Text.includes("subject total");
 
     if (!isMarksTable) return;
     marksTableFound = true;
@@ -178,7 +207,7 @@ function parseSubjects($) {
         continue;
       }
 
-      if (cells.length !== 8) continue;
+      if (cells.length < 5) continue;
 
       const subjectName = clean(cells[0]);
       if (!subjectName) continue;
@@ -188,16 +217,18 @@ function parseSubjects($) {
         FMarks: clean(cells[1] || ""),
         PMarks: clean(cells[2] || ""),
         theory: clean(cells[3] || ""),
-        subTotal: clean(cells[7] || "")
+        subTotal: clean(cells[cells.length - 1] || "")
       };
 
-      const practical = clean(cells[4] || "");
-      const regulationTheory = clean(cells[5] || "");
-      const regulationPractical = clean(cells[6] || "");
+      if (cells.length >= 8) {
+        const practical = clean(cells[4] || "");
+        const regulationTheory = clean(cells[5] || "");
+        const regulationPractical = clean(cells[6] || "");
 
-      if (practical !== "") obj.practical = practical;
-      if (regulationTheory !== "") obj.regulationTheory = regulationTheory;
-      if (regulationPractical !== "") obj.regulationPractical = regulationPractical;
+        if (practical !== "") obj.practical = practical;
+        if (regulationTheory !== "") obj.regulationTheory = regulationTheory;
+        if (regulationPractical !== "") obj.regulationPractical = regulationPractical;
+      }
 
       if (currentAdditionalSection) obj.extra = currentAdditionalSection;
 
@@ -231,19 +262,122 @@ function extractFullResult(html) {
   const kv = extractKeyValues($);
   const subjects = parseSubjects($);
 
+  // fallback text scan if table labels changed slightly
+  const fullText = clean($.text());
+
+  const rollCodeMatch = fullText.match(/Roll\s*Code\s*:?\s*(\d{5})/i);
+  const rollNoMatch = fullText.match(/Roll\s*Number\s*:?\s*(\d{8})/i);
+
   return {
-    studentName: kv["Student's Name"] || null,
-    fatherName: kv["Father's Name"] || null,
+    studentName: kv["Student's Name"] || kv["Student Name"] || null,
+    fatherName: kv["Father's Name"] || kv["Father Name"] || null,
     regNumber: kv["Registration Number"] || null,
-    BSEBUniqueId: kv["BSEB Unique Id"] || null,
-    schoolName: kv["School/College Name"] || null,
-    rollCode: kv["Roll Code"] || null,
-    rollNo: kv["Roll Number"] || null,
-    stream: kv["Faculty"] || null,
-    totalMarks: kv["Aggregate Marks"] || null,
-    Division: kv["Result/Division"] || null,
+    BSEBUniqueId: kv["BSEB Unique Id"] || kv["BSEB Unique ID"] || null,
+    schoolName: kv["School/College Name"] || kv["School Name"] || kv["College Name"] || null,
+    rollCode: kv["Roll Code"] || (rollCodeMatch ? rollCodeMatch[1] : null),
+    rollNo: kv["Roll Number"] || (rollNoMatch ? rollNoMatch[1] : null),
+    stream: kv["Faculty"] || kv["Stream"] || null,
+    totalMarks: kv["Aggregate Marks"] || kv["Total Marks"] || null,
+    Division: kv["Result/Division"] || kv["Division"] || kv["Result"] || null,
     subjects
   };
+}
+
+// ===============================
+// VALID / INVALID CHECK
+// ===============================
+function looksLikeValidationPage(html) {
+  const t = clean(String(html || "")).toLowerCase();
+
+  return (
+    t.includes("enter roll code") ||
+    t.includes("enter roll number") ||
+    t.includes("enter captcha") ||
+    t.includes("incorrect captcha") ||
+    t.includes("please enter correct captcha") ||
+    t.includes("view result") && t.includes("generatedcaptcha")
+  );
+}
+
+function looksLikeNoRecord(html) {
+  const t = clean(String(html || "")).toLowerCase();
+
+  return (
+    t.includes("no record") ||
+    t.includes("not found") ||
+    t.includes("invalid")
+  );
+}
+
+// ===============================
+// SESSION FETCH
+// ===============================
+async function getSessionData() {
+  const res = await client.get(FORM_URL);
+  const html = res.data;
+  const $ = cheerio.load(html);
+
+  const rawCookies = res.headers["set-cookie"] || [];
+  const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
+
+  const token =
+    clean($('input[name="__RequestVerificationToken"]').val() || "");
+
+  if (!token) {
+    fs.writeFileSync("debug-default.html", html, "utf8");
+    throw new Error("Could not fetch RequestVerificationToken");
+  }
+
+  return {
+    cookieHeader,
+    requestVerificationToken: token
+  };
+}
+
+// ===============================
+// FETCH ONE RESULT
+// ===============================
+async function fetchStudentResult(rollCode, rollNo, sessionData) {
+  try {
+    const payload = new URLSearchParams();
+    payload.append("rollcode", String(rollCode));
+    payload.append("rollno", String(rollNo));
+    payload.append("captcha", generateCaptcha());
+    payload.append("__RequestVerificationToken", sessionData.requestVerificationToken);
+
+    const res = await client.post(POST_URL, payload.toString(), {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Cookie": sessionData.cookieHeader,
+        "Referer": FORM_URL,
+        "Origin": "https://interbiharboard.com"
+      }
+    });
+
+    const html = String(res.data || "");
+
+    if (looksLikeNoRecord(html)) {
+      return { valid: false, reason: "no-record" };
+    }
+
+    if (looksLikeValidationPage(html)) {
+      return { valid: false, reason: "validation" };
+    }
+
+    const result = extractFullResult(html);
+
+    if (
+      result.studentName &&
+      result.rollCode === String(rollCode) &&
+      result.rollNo === String(rollNo)
+    ) {
+      return { valid: true, data: result };
+    }
+
+    return { valid: false, reason: "unparsed" };
+  } catch (err) {
+    return { valid: false, reason: "error", error: err.message };
+  }
 }
 
 // ===============================
@@ -254,97 +388,6 @@ function loadValidRollCodes() {
   return Object.keys(raw)
     .filter(code => /^\d+$/.test(code))
     .sort((a, b) => Number(a) - Number(b));
-}
-
-// ===============================
-// FETCH ONE RESULT (PLAYWRIGHT)
-// ===============================
-async function fetchStudentResult(browser, rollCode, rollNo) {
-  const context = await browser.newContext({
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-  });
-
-  const page = await context.newPage();
-
-  try {
-    await page.goto(BASE_URL, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000
-    });
-
-    await page.waitForSelector('input[name="rollcode"]', { timeout: 15000 });
-    await page.waitForSelector('input[name="rollno"]', { timeout: 15000 });
-    await page.waitForSelector('#generatedCaptcha', { timeout: 15000 });
-    await page.waitForSelector('input[name="captcha"]', { timeout: 15000 });
-
-    await page.fill('input[name="rollcode"]', String(rollCode));
-    await page.fill('input[name="rollno"]', String(rollNo));
-
-    const captchaValue = await page.$eval("#generatedCaptcha", el => {
-      return (el.dataset.value || el.textContent || "").trim();
-    });
-
-    if (!captchaValue || captchaValue.length !== 6) {
-      await context.close();
-      return { valid: false };
-    }
-
-    await page.fill('input[name="captcha"]', captchaValue);
-
-    await Promise.all([
-      page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {}),
-      page.click('button[type="submit"]')
-    ]);
-
-    const finalUrl = page.url();
-    const html = await page.content();
-    const htmlLower = String(html || "").toLowerCase();
-
-    if (
-      htmlLower.includes("incorrect captcha") ||
-      htmlLower.includes("please enter captcha") ||
-      htmlLower.includes("invalid captcha")
-    ) {
-      await context.close();
-      return { valid: false };
-    }
-
-    if (
-      htmlLower.includes("invalid") ||
-      htmlLower.includes("no record") ||
-      htmlLower.includes("not found")
-    ) {
-      await context.close();
-      return { valid: false };
-    }
-
-    const result = extractFullResult(html);
-
-    if (
-      result.studentName &&
-      result.rollCode === String(rollCode) &&
-      result.rollNo === String(rollNo)
-    ) {
-      await context.close();
-      return { valid: true, data: result, finalUrl };
-    }
-
-    await context.close();
-    return { valid: false, finalUrl };
-  } catch {
-    await context.close();
-    return { valid: false };
-  }
-}
-
-// ===============================
-// PROCESS CHUNK
-// ===============================
-async function processChunk(browser, rollCode, chunk) {
-  return await Promise.all(
-    chunk.map(rn => fetchStudentResult(browser, rollCode, rn))
-  );
 }
 
 // ===============================
@@ -369,11 +412,6 @@ async function processChunk(browser, rollCode, chunk) {
   let totalStudentsSaved = countTotalStudentsSaved(fullResults);
   let unsavedValidCount = 0;
 
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
-
   console.log(`🚀 SPLIT FULL RESULT SCRAPER STARTED`);
   console.log(`📚 Total valid roll codes available: ${allValidRollCodes.length}`);
   console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
@@ -396,10 +434,21 @@ async function processChunk(browser, rollCode, chunk) {
     let continuousFail = 0;
     let checkedInThisRollCode = 0;
     let savedInThisRollCode = 0;
+    let validationFailCount = 0;
+    let errorFailCount = 0;
 
     console.log(`▶️ Checking Roll Code ${rollCode}`);
 
     while (currentRollNo <= ROLLNO_END) {
+      let sessionData;
+
+      try {
+        sessionData = await getSessionData();
+      } catch (err) {
+        console.log(`⚠️ Session fetch failed for ${rollCode}: ${err.message}`);
+        break;
+      }
+
       const batchEnd = Math.min(currentRollNo + BATCH_SIZE - 1, ROLLNO_END);
       const batchRollNos = [];
 
@@ -409,7 +458,10 @@ async function processChunk(browser, rollCode, chunk) {
 
       for (let i = 0; i < batchRollNos.length; i += CONCURRENCY) {
         const chunk = batchRollNos.slice(i, i + CONCURRENCY);
-        const results = await processChunk(browser, rollCode, chunk);
+
+        const results = await Promise.all(
+          chunk.map(rn => fetchStudentResult(rollCode, rn, sessionData))
+        );
 
         for (let j = 0; j < chunk.length; j++) {
           const rn = chunk[j];
@@ -429,9 +481,17 @@ async function processChunk(browser, rollCode, chunk) {
             }
           } else {
             continuousFail++;
+
+            if (result.reason === "validation") validationFailCount++;
+            if (result.reason === "error") errorFailCount++;
           }
 
-          if (foundInThisRollCode === 0 && checkedInThisRollCode >= FIRST_CHECK_LIMIT) {
+          // safer skip only if clearly no records and not too many validation fails
+          if (
+            foundInThisRollCode === 0 &&
+            checkedInThisRollCode >= FIRST_CHECK_LIMIT &&
+            validationFailCount < 20
+          ) {
             console.log(`⏭️ Skipped ${rollCode} (No student found in first ${FIRST_CHECK_LIMIT})`);
             currentRollNo = ROLLNO_END + 1;
             break;
@@ -465,8 +525,6 @@ async function processChunk(browser, rollCode, chunk) {
       console.log(`⚠️ No students saved from ${rollCode}`);
     }
   }
-
-  await browser.close();
 
   saveCustomJSON(OUTPUT_FILE, fullResults);
   console.log(`🎉 SPLIT COMPLETED | Range ${START_INDEX}-${END_INDEX} | Total Saved: ${totalStudentsSaved}`);
