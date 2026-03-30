@@ -1,5 +1,1 @@
-{
-  "mode": "full-result-production",
-  "currentRollCode": "11028",
-  "currentRollNo": 26010001
-}
+SPLIT COMPLETED | Range 1100-1200 | Total Saved: 87263
