@@ -1,35 +1,70 @@
-const fs = require("fs");
+const axios = require("axios");
 const cheerio = require("cheerio");
-const { chromium } = require("playwright");
+const fs = require("fs");
 
 // ===============================
 // CONFIG
 // ===============================
 const BASE_URL = "https://interbiharboard.com/";
+const FORM_URL = "https://interbiharboard.com/";
+const POST_URL = "https://interbiharboard.com/Result/GetResult";
 
 const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
+const PROGRESS_FILE = "progress.txt";
 
 // Roll number range per roll code
 const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
+// ===============================
+// SPEED / PARALLEL SETTINGS
+// ===============================
+
+// How many roll codes to run together
+const PARALLEL_ROLL_CODES = 10;
+
+// How many roll numbers per roll code in one round
+const ROUND_SIZE_PER_ROLLCODE = 150;
+
+// Global request concurrency
+const CONCURRENCY = 150;
+
+// Timeout per request
+const REQUEST_TIMEOUT = 7000;
+
+// Save after every X valid results
+const SAVE_EVERY_VALID_RESULTS = 100;
+
 // Skip logic
 const FIRST_CHECK_LIMIT = 100;
 const CONTINUOUS_FAIL_LIMIT = 20;
 
-// Speed
-const CONCURRENCY = 50; // browser mode me realistic
-const BATCH_SIZE = 200;
-
-// Save
-const SAVE_EVERY_VALID_RESULTS = 100;
-
 // ===============================
 // SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
-const START_INDEX = 1000;
-const END_INDEX = 1100;
+const START_INDEX = 1100;
+const END_INDEX = 1200;
+
+// ===============================
+// AXIOS CLIENT
+// ===============================
+const client = axios.create({
+  timeout: REQUEST_TIMEOUT,
+  maxRedirects: 5,
+  validateStatus: () => true,
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept":
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1"
+  }
+});
 
 // ===============================
 // HELPERS
@@ -47,12 +82,28 @@ function loadJSON(file, fallback = {}) {
   }
 }
 
+function saveProgress(msg) {
+  fs.writeFileSync(PROGRESS_FILE, msg + "\n", "utf8");
+}
+
+function countTotalStudentsSaved(fullResults) {
+  let total = 0;
+  for (const rollCode of Object.keys(fullResults)) {
+    total += Object.keys(fullResults[rollCode] || {}).length;
+  }
+  return total;
+}
+
 function detectAdditionalSection(text) {
   const t = clean(text).toLowerCase();
   if (t.includes("additional") || t.includes("अतिरिक्त")) {
     return clean(text);
   }
   return null;
+}
+
+function generateCaptcha() {
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 // ===============================
@@ -122,14 +173,6 @@ function saveCustomJSON(file, data) {
   fs.writeFileSync(file, lines.join("\n"), "utf8");
 }
 
-function countTotalStudentsSaved(fullResults) {
-  let total = 0;
-  for (const rollCode of Object.keys(fullResults)) {
-    total += Object.keys(fullResults[rollCode] || {}).length;
-  }
-  return total;
-}
-
 // ===============================
 // SUBJECT PARSER
 // ===============================
@@ -158,10 +201,7 @@ function parseSubjects($) {
       row1Text.includes("full marks") &&
       row1Text.includes("pass marks") &&
       row1Text.includes("theory") &&
-      row1Text.includes("practical") &&
-      row1Text.includes("subject total") &&
-      row2Text.includes("th.") &&
-      row2Text.includes("pr.");
+      row1Text.includes("subject total");
 
     if (!isMarksTable) return;
     marksTableFound = true;
@@ -178,7 +218,7 @@ function parseSubjects($) {
         continue;
       }
 
-      if (cells.length !== 8) continue;
+      if (cells.length < 5) continue;
 
       const subjectName = clean(cells[0]);
       if (!subjectName) continue;
@@ -188,16 +228,12 @@ function parseSubjects($) {
         FMarks: clean(cells[1] || ""),
         PMarks: clean(cells[2] || ""),
         theory: clean(cells[3] || ""),
-        subTotal: clean(cells[7] || "")
+        subTotal: clean(cells[cells.length - 1] || "")
       };
 
-      const practical = clean(cells[4] || "");
-      const regulationTheory = clean(cells[5] || "");
-      const regulationPractical = clean(cells[6] || "");
-
-      if (practical !== "") obj.practical = practical;
-      if (regulationTheory !== "") obj.regulationTheory = regulationTheory;
-      if (regulationPractical !== "") obj.regulationPractical = regulationPractical;
+      if (cells[4] !== undefined && clean(cells[4]) !== "") obj.practical = clean(cells[4]);
+      if (cells[5] !== undefined && clean(cells[5]) !== "") obj.regulationTheory = clean(cells[5]);
+      if (cells[6] !== undefined && clean(cells[6]) !== "") obj.regulationPractical = clean(cells[6]);
 
       if (currentAdditionalSection) obj.extra = currentAdditionalSection;
 
@@ -230,20 +266,156 @@ function extractFullResult(html) {
   const $ = cheerio.load(html);
   const kv = extractKeyValues($);
   const subjects = parseSubjects($);
+  const pageText = clean($.text());
+
+  const studentName =
+    kv["Student's Name"] ||
+    kv["Student Name"] ||
+    kv["Name"] ||
+    null;
+
+  const fatherName =
+    kv["Father's Name"] ||
+    kv["Father Name"] ||
+    null;
+
+  const regNumber =
+    kv["Registration Number"] ||
+    kv["Registration No"] ||
+    null;
+
+  const BSEBUniqueId =
+    kv["BSEB Unique Id"] ||
+    kv["BSEB Unique ID"] ||
+    null;
+
+  const schoolName =
+    kv["School/College Name"] ||
+    kv["School Name"] ||
+    kv["College Name"] ||
+    null;
+
+  const rollCode =
+    kv["Roll Code"] ||
+    null;
+
+  const rollNo =
+    kv["Roll Number"] ||
+    kv["Roll No"] ||
+    null;
+
+  const stream =
+    kv["Faculty"] ||
+    kv["Stream"] ||
+    null;
+
+  const totalMarks =
+    kv["Aggregate Marks"] ||
+    kv["Total Marks"] ||
+    null;
+
+  const Division =
+    kv["Result/Division"] ||
+    kv["Division"] ||
+    kv["Result"] ||
+    null;
 
   return {
-    studentName: kv["Student's Name"] || null,
-    fatherName: kv["Father's Name"] || null,
-    regNumber: kv["Registration Number"] || null,
-    BSEBUniqueId: kv["BSEB Unique Id"] || null,
-    schoolName: kv["School/College Name"] || null,
-    rollCode: kv["Roll Code"] || null,
-    rollNo: kv["Roll Number"] || null,
-    stream: kv["Faculty"] || null,
-    totalMarks: kv["Aggregate Marks"] || null,
-    Division: kv["Result/Division"] || null,
-    subjects
+    studentName,
+    fatherName,
+    regNumber,
+    BSEBUniqueId,
+    schoolName,
+    rollCode,
+    rollNo,
+    stream,
+    totalMarks,
+    Division,
+    subjects,
+    _pageText: pageText
   };
+}
+
+// ===============================
+// FETCH TOKEN / COOKIE
+// ===============================
+async function getSessionData() {
+  const res = await client.get(FORM_URL);
+  const html = res.data;
+  const $ = cheerio.load(html);
+
+  const rawCookies = res.headers["set-cookie"] || [];
+  const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
+
+  const token =
+    $('input[name="__RequestVerificationToken"]').val() ||
+    "";
+
+  if (!token) {
+    throw new Error("Could not fetch RequestVerificationToken");
+  }
+
+  return {
+    cookieHeader,
+    token
+  };
+}
+
+// ===============================
+// FETCH ONE RESULT
+// ===============================
+async function fetchStudentResult(rollCode, rollNo) {
+  try {
+    const sessionData = await getSessionData();
+
+    const payload = new URLSearchParams();
+    payload.append("rollcode", String(rollCode));
+    payload.append("rollno", String(rollNo));
+    payload.append("captcha", generateCaptcha());
+    payload.append("__RequestVerificationToken", sessionData.token);
+
+    const res = await client.post(POST_URL, payload.toString(), {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Cookie": sessionData.cookieHeader,
+        "Referer": FORM_URL,
+        "Origin": "https://interbiharboard.com"
+      }
+    });
+
+    const html = String(res.data || "");
+    const htmlLower = html.toLowerCase();
+
+    // Obvious invalid page
+    if (
+      htmlLower.includes("incorrect captcha") ||
+      htmlLower.includes("please enter correct captcha") ||
+      htmlLower.includes("please enter roll code") ||
+      htmlLower.includes("please enter roll number") ||
+      htmlLower.includes("validation") ||
+      htmlLower.includes("token")
+    ) {
+      return { valid: false };
+    }
+
+    // If redirected to ShowResult or page contains result-like data
+    const result = extractFullResult(html);
+
+    if (
+      result.studentName &&
+      (result.rollCode === String(rollCode) || !result.rollCode) &&
+      (result.rollNo === String(rollNo) || !result.rollNo)
+    ) {
+      delete result._pageText;
+      result.rollCode = result.rollCode || String(rollCode);
+      result.rollNo = result.rollNo || String(rollNo);
+      return { valid: true, data: result };
+    }
+
+    return { valid: false };
+  } catch {
+    return { valid: false };
+  }
 }
 
 // ===============================
@@ -257,100 +429,23 @@ function loadValidRollCodes() {
 }
 
 // ===============================
-// FETCH ONE RESULT (REAL BROWSER)
+// CONCURRENCY HELPER
 // ===============================
-async function fetchStudentResult(browser, rollCode, rollNo) {
-  let page;
-  try {
-    const context = await browser.newContext();
-    page = await context.newPage();
+async function runWithConcurrency(tasks, limit) {
+  const results = new Array(tasks.length);
+  let index = 0;
 
-    await page.goto(BASE_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
-
-    await page.fill("#rollcode", String(rollCode));
-    await page.fill("#rollno", String(rollNo));
-
-    // Browser ke andar actual captcha read karo
-    const captchaValue = await page.evaluate(() => {
-      const el = document.getElementById("generatedCaptcha");
-      if (!el) return "";
-      return (
-        el.dataset.value ||
-        el.getAttribute("data-value") ||
-        el.textContent ||
-        ""
-      ).trim();
-    });
-
-    if (!captchaValue || captchaValue === "000000") {
-      await page.evaluate(() => {
-        if (typeof generateCaptcha === "function") generateCaptcha();
-      });
-
-      await page.waitForTimeout(300);
-
-      const retryCaptcha = await page.evaluate(() => {
-        const el = document.getElementById("generatedCaptcha");
-        if (!el) return "";
-        return (
-          el.dataset.value ||
-          el.getAttribute("data-value") ||
-          el.textContent ||
-          ""
-        ).trim();
-      });
-
-      if (!retryCaptcha || retryCaptcha === "000000") {
-        await context.close();
-        return { valid: false };
-      }
-
-      await page.fill("#captchaInput", retryCaptcha);
-    } else {
-      await page.fill("#captchaInput", captchaValue);
+  async function worker() {
+    while (true) {
+      const current = index++;
+      if (current >= tasks.length) break;
+      results[current] = await tasks[current]();
     }
-
-    await Promise.all([
-      page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {}),
-      page.click('button[type="submit"]')
-    ]);
-
-    await page.waitForTimeout(1500);
-
-    const html = await page.content();
-    const htmlLower = html.toLowerCase();
-    const finalUrl = page.url().toLowerCase();
-
-    const looksLikeResultPage =
-      finalUrl.includes("/result/showresult") ||
-      htmlLower.includes("student's name") ||
-      htmlLower.includes("school/college name") ||
-      htmlLower.includes("aggregate marks");
-
-    if (!looksLikeResultPage) {
-      await context.close();
-      return { valid: false };
-    }
-
-    const result = extractFullResult(html);
-
-    await context.close();
-
-    if (
-      result.studentName &&
-      result.rollCode === String(rollCode) &&
-      result.rollNo === String(rollNo)
-    ) {
-      return { valid: true, data: result };
-    }
-
-    return { valid: false };
-  } catch {
-    try {
-      if (page) await page.context().close();
-    } catch {}
-    return { valid: false };
   }
+
+  const workers = Array.from({ length: limit }, () => worker());
+  await Promise.all(workers);
+  return results;
 }
 
 // ===============================
@@ -375,108 +470,145 @@ async function fetchStudentResult(browser, rollCode, rollNo) {
   let totalStudentsSaved = countTotalStudentsSaved(fullResults);
   let unsavedValidCount = 0;
 
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
-
-  console.log(`🚀 SPLIT FULL RESULT SCRAPER STARTED`);
+  console.log(`🚀 MULTI ROLL-CODE SCRAPER STARTED`);
   console.log(`📚 Total valid roll codes available: ${allValidRollCodes.length}`);
   console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
   console.log(`📦 Roll codes in this split: ${selectedRollCodes.length}`);
   console.log(`📦 Already saved students in JSON: ${totalStudentsSaved}`);
 
-  for (let rcIndex = 0; rcIndex < selectedRollCodes.length; rcIndex++) {
-    const rollCode = selectedRollCodes[rcIndex];
-
+  // State per roll code
+  const state = {};
+  for (const rollCode of selectedRollCodes) {
     if (!fullResults[rollCode]) fullResults[rollCode] = {};
 
     const alreadySavedForRollCode = Object.keys(fullResults[rollCode]).length;
+
+    state[rollCode] = {
+      currentRollNo: ROLLNO_START,
+      found: alreadySavedForRollCode,
+      checked: 0,
+      continuousFail: 0,
+      done: alreadySavedForRollCode > 0,
+      savedInThisRollCode: 0
+    };
+
     if (alreadySavedForRollCode > 0) {
       console.log(`⏭️ Skipping ${rollCode} (already has ${alreadySavedForRollCode} students saved)`);
-      continue;
-    }
-
-    let currentRollNo = ROLLNO_START;
-    let foundInThisRollCode = 0;
-    let continuousFail = 0;
-    let checkedInThisRollCode = 0;
-    let savedInThisRollCode = 0;
-
-    console.log(`▶️ Checking Roll Code ${rollCode}`);
-
-    while (currentRollNo <= ROLLNO_END) {
-      const batchEnd = Math.min(currentRollNo + BATCH_SIZE - 1, ROLLNO_END);
-      const batchRollNos = [];
-
-      for (let rn = currentRollNo; rn <= batchEnd; rn++) {
-        batchRollNos.push(rn);
-      }
-
-      for (let i = 0; i < batchRollNos.length; i += CONCURRENCY) {
-        const chunk = batchRollNos.slice(i, i + CONCURRENCY);
-
-        const results = await Promise.all(
-          chunk.map(rn => fetchStudentResult(browser, rollCode, rn))
-        );
-
-        for (let j = 0; j < chunk.length; j++) {
-          const rn = chunk[j];
-          const result = results[j];
-
-          checkedInThisRollCode++;
-
-          if (result.valid) {
-            continuousFail = 0;
-
-            if (!fullResults[rollCode][rn]) {
-              fullResults[rollCode][rn] = result.data;
-              unsavedValidCount++;
-              totalStudentsSaved++;
-              foundInThisRollCode++;
-              savedInThisRollCode++;
-            }
-          } else {
-            continuousFail++;
-          }
-
-          if (foundInThisRollCode === 0 && checkedInThisRollCode >= FIRST_CHECK_LIMIT) {
-            console.log(`⏭️ Skipped ${rollCode} (No student found in first ${FIRST_CHECK_LIMIT})`);
-            currentRollNo = ROLLNO_END + 1;
-            break;
-          }
-
-          if (foundInThisRollCode > 0 && continuousFail >= CONTINUOUS_FAIL_LIMIT) {
-            console.log(`⏹️ Stopped ${rollCode} after ${CONTINUOUS_FAIL_LIMIT} continuous fail`);
-            currentRollNo = ROLLNO_END + 1;
-            break;
-          }
-        }
-
-        if (unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
-          saveCustomJSON(OUTPUT_FILE, fullResults);
-          console.log(`💾 Progress Saved | Total Saved: ${totalStudentsSaved}`);
-          unsavedValidCount = 0;
-        }
-
-        if (currentRollNo > ROLLNO_END) break;
-      }
-
-      if (currentRollNo > ROLLNO_END) break;
-      currentRollNo = batchEnd + 1;
-    }
-
-    if (savedInThisRollCode > 0) {
-      saveCustomJSON(OUTPUT_FILE, fullResults);
-      console.log(`✅ Saved ${savedInThisRollCode} students from ${rollCode} | Total Saved: ${totalStudentsSaved}`);
-      unsavedValidCount = 0;
-    } else {
-      console.log(`⚠️ No students saved from ${rollCode}`);
     }
   }
 
-  await browser.close();
+  // Process roll codes in groups
+  for (let groupStart = 0; groupStart < selectedRollCodes.length; groupStart += PARALLEL_ROLL_CODES) {
+    const group = selectedRollCodes.slice(groupStart, groupStart + PARALLEL_ROLL_CODES);
+    console.log(`📍 Starting roll code group: ${group.join(", ")}`);
+
+    for (const rc of group) {
+      if (!state[rc].done) {
+        console.log(`▶️ Checking Roll Code ${rc}`);
+      }
+    }
+
+    let activeExists = true;
+
+    while (activeExists) {
+      activeExists = false;
+      const tasks = [];
+
+      for (const rollCode of group) {
+        const s = state[rollCode];
+        if (s.done) continue;
+        if (s.currentRollNo > ROLLNO_END) {
+          s.done = true;
+          continue;
+        }
+
+        activeExists = true;
+
+        const roundEnd = Math.min(s.currentRollNo + ROUND_SIZE_PER_ROLLCODE - 1, ROLLNO_END);
+
+        for (let rn = s.currentRollNo; rn <= roundEnd; rn++) {
+          tasks.push(async () => {
+            const result = await fetchStudentResult(rollCode, rn);
+            return { rollCode, rn, result };
+          });
+        }
+
+        s.currentRollNo = roundEnd + 1;
+      }
+
+      if (!tasks.length) break;
+
+      const results = await runWithConcurrency(tasks, CONCURRENCY);
+
+      for (const item of results) {
+        if (!item) continue;
+        const { rollCode, rn, result } = item;
+        const s = state[rollCode];
+
+        if (s.done) continue;
+
+        s.checked++;
+
+        if (result.valid) {
+          s.continuousFail = 0;
+
+          if (!fullResults[rollCode][rn]) {
+            fullResults[rollCode][rn] = result.data;
+            s.found++;
+            s.savedInThisRollCode++;
+            totalStudentsSaved++;
+            unsavedValidCount++;
+          }
+        } else {
+          s.continuousFail++;
+        }
+      }
+
+      // Apply stop logic after each round
+      for (const rollCode of group) {
+        const s = state[rollCode];
+        if (s.done) continue;
+
+        if (s.found === 0 && s.checked >= FIRST_CHECK_LIMIT) {
+          console.log(`⏭️ Skipped ${rollCode} (No student found in first ${FIRST_CHECK_LIMIT})`);
+          s.done = true;
+          continue;
+        }
+
+        if (s.found > 0 && s.continuousFail >= CONTINUOUS_FAIL_LIMIT) {
+          console.log(`⏹️ Stopped ${rollCode} after ${CONTINUOUS_FAIL_LIMIT} continuous fail`);
+          s.done = true;
+          continue;
+        }
+
+        if (s.currentRollNo > ROLLNO_END) {
+          s.done = true;
+        }
+      }
+
+      if (unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
+        saveCustomJSON(OUTPUT_FILE, fullResults);
+        saveProgress(`Progress Saved | Total Saved: ${totalStudentsSaved}`);
+        console.log(`💾 Progress Saved | Total Saved: ${totalStudentsSaved}`);
+        unsavedValidCount = 0;
+      }
+    }
+
+    // Group finished → print final roll code summaries in sequence
+    for (const rollCode of group) {
+      const s = state[rollCode];
+      if (s.savedInThisRollCode > 0) {
+        saveCustomJSON(OUTPUT_FILE, fullResults);
+        console.log(`✅ Saved ${s.savedInThisRollCode} students from ${rollCode} | Total Saved: ${totalStudentsSaved}`);
+        unsavedValidCount = 0;
+      } else if (Object.keys(fullResults[rollCode] || {}).length === 0) {
+        console.log(`⚠️ No students saved from ${rollCode}`);
+      }
+    }
+  }
+
   saveCustomJSON(OUTPUT_FILE, fullResults);
+  saveProgress(`SPLIT COMPLETED | Range ${START_INDEX}-${END_INDEX} | Total Saved: ${totalStudentsSaved}`);
 
   console.log(`🎉 SPLIT COMPLETED | Range ${START_INDEX}-${END_INDEX} | Total Saved: ${totalStudentsSaved}`);
 })();
