@@ -1,14 +1,12 @@
-name: One Student Check
+name: Debug One Student (InterBiharBoard)
 
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  check-one:
+  debug:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repo
@@ -22,7 +20,29 @@ jobs:
       - name: Install dependencies
         run: npm install axios cheerio
 
-      - name: Run one student check
+      - name: Show files
+        run: ls -la
+
+      - name: Run debug script
         run: node script.js
 
-      
+      - name: Upload debug HTML files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-html-files
+          path: |
+            debug-form.html
+            debug-result.html
+          if-no-files-found: warn
+
+      - name: Upload all debug text/json files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-extra-files
+          path: |
+            *.txt
+            *.json
+            *.log
+          if-no-files-found: ignore
