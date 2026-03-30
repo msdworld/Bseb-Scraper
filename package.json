@@ -1,13 +1,10 @@
 {
   "name": "bseb-scraper",
   "version": "1.0.0",
-  "description": "BSEB Full Result Scraper",
   "main": "script.js",
-  "scripts": {
-    "start": "node script.js"
-  },
+  "license": "MIT",
   "dependencies": {
-    "cheerio": "^1.0.0",
-    "playwright": "^1.52.0"
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0"
   }
 }
