@@ -1,8 +1,6 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
-const http = require("http");
-const https = require("https");
 
 // ===============================
 // CONFIG
@@ -18,14 +16,14 @@ const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
 const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
-// Skip logic (safer than before)
-const FIRST_CHECK_LIMIT = 200;
-const CONTINUOUS_FAIL_LIMIT = 50;
+// Skip logic
+const FIRST_CHECK_LIMIT = 100;
+const CONTINUOUS_FAIL_LIMIT = 20;
 
 // Speed
-const CONCURRENCY = 100; // safer for this site, can try 30 later
-const BATCH_SIZE = 400;
-const REQUEST_TIMEOUT = 12000;
+const CONCURRENCY = 500; // keep lower for stability on new site
+const BATCH_SIZE = 1000;
+const REQUEST_TIMEOUT = 10000;
 
 // Save
 const SAVE_EVERY_VALID_RESULTS = 100;
@@ -43,8 +41,6 @@ const client = axios.create({
   timeout: REQUEST_TIMEOUT,
   maxRedirects: 5,
   validateStatus: () => true,
-  httpAgent: new http.Agent({ keepAlive: true, maxSockets: 100 }),
-  httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 100 }),
   headers: {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -65,10 +61,6 @@ function clean(txt) {
   return (txt || "").replace(/\s+/g, " ").trim();
 }
 
-function generateCaptcha() {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
-
 function loadJSON(file, fallback = {}) {
   if (!fs.existsSync(file)) return fallback;
   try {
@@ -76,6 +68,14 @@ function loadJSON(file, fallback = {}) {
   } catch {
     return fallback;
   }
+}
+
+function generateCaptcha() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function getRequestVerificationToken($) {
+  return clean($('input[name="__RequestVerificationToken"]').val() || "");
 }
 
 function detectAdditionalSection(text) {
@@ -220,15 +220,13 @@ function parseSubjects($) {
         subTotal: clean(cells[cells.length - 1] || "")
       };
 
-      if (cells.length >= 8) {
-        const practical = clean(cells[4] || "");
-        const regulationTheory = clean(cells[5] || "");
-        const regulationPractical = clean(cells[6] || "");
+      const practical = clean(cells[4] || "");
+      const regulationTheory = clean(cells[5] || "");
+      const regulationPractical = clean(cells[6] || "");
 
-        if (practical !== "") obj.practical = practical;
-        if (regulationTheory !== "") obj.regulationTheory = regulationTheory;
-        if (regulationPractical !== "") obj.regulationPractical = regulationPractical;
-      }
+      if (practical !== "") obj.practical = practical;
+      if (regulationTheory !== "") obj.regulationTheory = regulationTheory;
+      if (regulationPractical !== "") obj.regulationPractical = regulationPractical;
 
       if (currentAdditionalSection) obj.extra = currentAdditionalSection;
 
@@ -262,51 +260,19 @@ function extractFullResult(html) {
   const kv = extractKeyValues($);
   const subjects = parseSubjects($);
 
-  // fallback text scan if table labels changed slightly
-  const fullText = clean($.text());
-
-  const rollCodeMatch = fullText.match(/Roll\s*Code\s*:?\s*(\d{5})/i);
-  const rollNoMatch = fullText.match(/Roll\s*Number\s*:?\s*(\d{8})/i);
-
   return {
     studentName: kv["Student's Name"] || kv["Student Name"] || null,
     fatherName: kv["Father's Name"] || kv["Father Name"] || null,
     regNumber: kv["Registration Number"] || null,
     BSEBUniqueId: kv["BSEB Unique Id"] || kv["BSEB Unique ID"] || null,
-    schoolName: kv["School/College Name"] || kv["School Name"] || kv["College Name"] || null,
-    rollCode: kv["Roll Code"] || (rollCodeMatch ? rollCodeMatch[1] : null),
-    rollNo: kv["Roll Number"] || (rollNoMatch ? rollNoMatch[1] : null),
+    schoolName: kv["School/College Name"] || kv["College Name"] || kv["School Name"] || null,
+    rollCode: kv["Roll Code"] || null,
+    rollNo: kv["Roll Number"] || null,
     stream: kv["Faculty"] || kv["Stream"] || null,
     totalMarks: kv["Aggregate Marks"] || kv["Total Marks"] || null,
     Division: kv["Result/Division"] || kv["Division"] || kv["Result"] || null,
     subjects
   };
-}
-
-// ===============================
-// VALID / INVALID CHECK
-// ===============================
-function looksLikeValidationPage(html) {
-  const t = clean(String(html || "")).toLowerCase();
-
-  return (
-    t.includes("enter roll code") ||
-    t.includes("enter roll number") ||
-    t.includes("enter captcha") ||
-    t.includes("incorrect captcha") ||
-    t.includes("please enter correct captcha") ||
-    t.includes("view result") && t.includes("generatedcaptcha")
-  );
-}
-
-function looksLikeNoRecord(html) {
-  const t = clean(String(html || "")).toLowerCase();
-
-  return (
-    t.includes("no record") ||
-    t.includes("not found") ||
-    t.includes("invalid")
-  );
 }
 
 // ===============================
@@ -319,18 +285,16 @@ async function getSessionData() {
 
   const rawCookies = res.headers["set-cookie"] || [];
   const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
+  const RequestVerificationToken = getRequestVerificationToken($);
 
-  const token =
-    clean($('input[name="__RequestVerificationToken"]').val() || "");
-
-  if (!token) {
-    fs.writeFileSync("debug-default.html", html, "utf8");
-    throw new Error("Could not fetch RequestVerificationToken");
+  if (!RequestVerificationToken) {
+    fs.writeFileSync("debug-form.html", html);
+    throw new Error("Could not fetch __RequestVerificationToken");
   }
 
   return {
     cookieHeader,
-    requestVerificationToken: token
+    RequestVerificationToken
   };
 }
 
@@ -339,11 +303,13 @@ async function getSessionData() {
 // ===============================
 async function fetchStudentResult(rollCode, rollNo, sessionData) {
   try {
+    const captchaValue = generateCaptcha();
+
     const payload = new URLSearchParams();
     payload.append("rollcode", String(rollCode));
     payload.append("rollno", String(rollNo));
-    payload.append("captcha", generateCaptcha());
-    payload.append("__RequestVerificationToken", sessionData.requestVerificationToken);
+    payload.append("captcha", captchaValue);
+    payload.append("__RequestVerificationToken", sessionData.RequestVerificationToken);
 
     const res = await client.post(POST_URL, payload.toString(), {
       headers: {
@@ -355,13 +321,26 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
     });
 
     const html = String(res.data || "");
+    const htmlLower = html.toLowerCase();
 
-    if (looksLikeNoRecord(html)) {
-      return { valid: false, reason: "no-record" };
+    // If site sends form back again, treat invalid
+    const looksLikeFormAgain =
+      htmlLower.includes('id="resultform"') &&
+      htmlLower.includes("enter roll code") &&
+      htmlLower.includes("enter captcha");
+
+    if (looksLikeFormAgain) {
+      return { valid: false, reason: "form_returned" };
     }
 
-    if (looksLikeValidationPage(html)) {
-      return { valid: false, reason: "validation" };
+    if (
+      htmlLower.includes("invalid") ||
+      htmlLower.includes("no record") ||
+      htmlLower.includes("not found") ||
+      htmlLower.includes("incorrect captcha") ||
+      htmlLower.includes("please enter correct captcha")
+    ) {
+      return { valid: false, reason: "invalid_page" };
     }
 
     const result = extractFullResult(html);
@@ -374,9 +353,9 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
       return { valid: true, data: result };
     }
 
-    return { valid: false, reason: "unparsed" };
+    return { valid: false, reason: "no_result_match" };
   } catch (err) {
-    return { valid: false, reason: "error", error: err.message };
+    return { valid: false, reason: "request_failed" };
   }
 }
 
@@ -434,21 +413,10 @@ function loadValidRollCodes() {
     let continuousFail = 0;
     let checkedInThisRollCode = 0;
     let savedInThisRollCode = 0;
-    let validationFailCount = 0;
-    let errorFailCount = 0;
 
     console.log(`▶️ Checking Roll Code ${rollCode}`);
 
     while (currentRollNo <= ROLLNO_END) {
-      let sessionData;
-
-      try {
-        sessionData = await getSessionData();
-      } catch (err) {
-        console.log(`⚠️ Session fetch failed for ${rollCode}: ${err.message}`);
-        break;
-      }
-
       const batchEnd = Math.min(currentRollNo + BATCH_SIZE - 1, ROLLNO_END);
       const batchRollNos = [];
 
@@ -458,6 +426,9 @@ function loadValidRollCodes() {
 
       for (let i = 0; i < batchRollNos.length; i += CONCURRENCY) {
         const chunk = batchRollNos.slice(i, i + CONCURRENCY);
+
+        // fresh session per small chunk = much more stable on new site
+        const sessionData = await getSessionData();
 
         const results = await Promise.all(
           chunk.map(rn => fetchStudentResult(rollCode, rn, sessionData))
@@ -481,17 +452,9 @@ function loadValidRollCodes() {
             }
           } else {
             continuousFail++;
-
-            if (result.reason === "validation") validationFailCount++;
-            if (result.reason === "error") errorFailCount++;
           }
 
-          // safer skip only if clearly no records and not too many validation fails
-          if (
-            foundInThisRollCode === 0 &&
-            checkedInThisRollCode >= FIRST_CHECK_LIMIT &&
-            validationFailCount < 20
-          ) {
+          if (foundInThisRollCode === 0 && checkedInThisRollCode >= FIRST_CHECK_LIMIT) {
             console.log(`⏭️ Skipped ${rollCode} (No student found in first ${FIRST_CHECK_LIMIT})`);
             currentRollNo = ROLLNO_END + 1;
             break;
@@ -527,5 +490,6 @@ function loadValidRollCodes() {
   }
 
   saveCustomJSON(OUTPUT_FILE, fullResults);
+
   console.log(`🎉 SPLIT COMPLETED | Range ${START_INDEX}-${END_INDEX} | Total Saved: ${totalStudentsSaved}`);
 })();
