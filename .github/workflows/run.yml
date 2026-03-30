@@ -50,4 +50,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bseb-full-result-data
-          path: bseb-12th-full-result-2026.json
+          path: |
+            bseb-12th-full-result-2026.json
