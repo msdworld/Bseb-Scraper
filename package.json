@@ -1,6 +1,7 @@
 {
   "name": "bseb-scraper",
   "version": "1.0.0",
+  "description": "BSEB Full Result Scraper",
   "main": "script.js",
   "scripts": {
     "start": "node script.js"
