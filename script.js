@@ -5,7 +5,7 @@ const fs = require("fs");
 // ===============================
 // CONFIG
 // ===============================
-const BASE_URL = "https://interbiharboard.com/Default.html";
+const BASE_URL = "https://interbiharboard.com/";
 
 const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
