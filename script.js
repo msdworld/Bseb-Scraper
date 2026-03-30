@@ -1,13 +1,14 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
+const http = require("http");
+const https = require("https");
 
 // ===============================
 // CONFIG
 // ===============================
 const BASE_URL = "https://interbiharboard.com/";
 const POST_URL = "https://interbiharboard.com/Result/GetResult";
-const SHOW_RESULT_URL = "https://interbiharboard.com/Result/ShowResult";
 
 const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
@@ -21,9 +22,9 @@ const FIRST_CHECK_LIMIT = 100;
 const CONTINUOUS_FAIL_LIMIT = 20;
 
 // Speed
-const CONCURRENCY = 500; // safer for new site
-const BATCH_SIZE = 1000;
-const REQUEST_TIMEOUT = 8000;
+const CONCURRENCY = 500;
+const BATCH_SIZE = 2000;
+const REQUEST_TIMEOUT = 7000;
 
 // Save
 const SAVE_EVERY_VALID_RESULTS = 100;
@@ -31,16 +32,34 @@ const SAVE_EVERY_VALID_RESULTS = 100;
 // ===============================
 // SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
-const START_INDEX = 500;
-const END_INDEX = 1000;
+const START_INDEX = 1000;
+const END_INDEX = 1500;
 
 // ===============================
-// AXIOS CLIENT
+// AXIOS CLIENT (OPTIMIZED)
 // ===============================
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 300,
+  maxFreeSockets: 100,
+  timeout: 30000,
+  keepAliveMsecs: 10000
+});
+
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 300,
+  maxFreeSockets: 100,
+  timeout: 30000,
+  keepAliveMsecs: 10000
+});
+
 const client = axios.create({
   timeout: REQUEST_TIMEOUT,
-  maxRedirects: 0, // IMPORTANT
+  maxRedirects: 5,
   validateStatus: () => true,
+  httpAgent,
+  httpsAgent,
   headers: {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -50,7 +69,9 @@ const client = axios.create({
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
     "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1"
+    "Upgrade-Insecure-Requests": "1",
+    "Origin": "https://interbiharboard.com",
+    "Referer": "https://interbiharboard.com/"
   }
 });
 
@@ -59,10 +80,6 @@ const client = axios.create({
 // ===============================
 function clean(txt) {
   return (txt || "").replace(/\s+/g, " ").trim();
-}
-
-function generateCaptcha() {
-  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 function loadJSON(file, fallback = {}) {
@@ -74,43 +91,16 @@ function loadJSON(file, fallback = {}) {
   }
 }
 
+function generateCaptcha() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
 function detectAdditionalSection(text) {
   const t = clean(text).toLowerCase();
   if (t.includes("additional") || t.includes("अतिरिक्त")) {
     return clean(text);
   }
   return null;
-}
-
-function extractRequestVerificationToken(html) {
-  const $ = cheerio.load(html);
-  return clean($('input[name="__RequestVerificationToken"]').val() || "");
-}
-
-function mergeCookies(oldCookieHeader, newSetCookies = []) {
-  const jar = {};
-
-  function addCookieString(str) {
-    if (!str) return;
-    str.split(";").forEach(part => {
-      const p = part.trim();
-      if (!p.includes("=")) return;
-      const [k, ...rest] = p.split("=");
-      const v = rest.join("=");
-      if (k && v !== undefined) jar[k.trim()] = v.trim();
-    });
-  }
-
-  addCookieString(oldCookieHeader);
-
-  newSetCookies.forEach(c => {
-    const first = c.split(";")[0];
-    addCookieString(first);
-  });
-
-  return Object.entries(jar)
-    .map(([k, v]) => `${k}=${v}`)
-    .join("; ");
 }
 
 // ===============================
@@ -216,7 +206,10 @@ function parseSubjects($) {
       row1Text.includes("full marks") &&
       row1Text.includes("pass marks") &&
       row1Text.includes("theory") &&
-      row1Text.includes("subject total");
+      row1Text.includes("practical") &&
+      row1Text.includes("subject total") &&
+      row2Text.includes("th.") &&
+      row2Text.includes("pr.");
 
     if (!isMarksTable) return;
     marksTableFound = true;
@@ -233,7 +226,7 @@ function parseSubjects($) {
         continue;
       }
 
-      if (cells.length < 5) continue;
+      if (cells.length !== 8) continue;
 
       const subjectName = clean(cells[0]);
       if (!subjectName) continue;
@@ -243,12 +236,16 @@ function parseSubjects($) {
         FMarks: clean(cells[1] || ""),
         PMarks: clean(cells[2] || ""),
         theory: clean(cells[3] || ""),
-        subTotal: clean(cells[cells.length - 1] || "")
+        subTotal: clean(cells[7] || "")
       };
 
-      if (cells[4]) obj.practical = clean(cells[4] || "");
-      if (cells[5]) obj.regulationTheory = clean(cells[5] || "");
-      if (cells[6]) obj.regulationPractical = clean(cells[6] || "");
+      const practical = clean(cells[4] || "");
+      const regulationTheory = clean(cells[5] || "");
+      const regulationPractical = clean(cells[6] || "");
+
+      if (practical !== "") obj.practical = practical;
+      if (regulationTheory !== "") obj.regulationTheory = regulationTheory;
+      if (regulationPractical !== "") obj.regulationPractical = regulationPractical;
 
       if (currentAdditionalSection) obj.extra = currentAdditionalSection;
 
@@ -283,16 +280,16 @@ function extractFullResult(html) {
   const subjects = parseSubjects($);
 
   return {
-    studentName: kv["Student's Name"] || kv["Student Name"] || null,
-    fatherName: kv["Father's Name"] || kv["Father Name"] || null,
+    studentName: kv["Student's Name"] || null,
+    fatherName: kv["Father's Name"] || null,
     regNumber: kv["Registration Number"] || null,
     BSEBUniqueId: kv["BSEB Unique Id"] || null,
-    schoolName: kv["School/College Name"] || kv["College Name"] || null,
+    schoolName: kv["School/College Name"] || null,
     rollCode: kv["Roll Code"] || null,
     rollNo: kv["Roll Number"] || null,
-    stream: kv["Faculty"] || kv["Stream"] || null,
-    totalMarks: kv["Aggregate Marks"] || kv["Total Marks"] || null,
-    Division: kv["Result/Division"] || kv["Division"] || null,
+    stream: kv["Faculty"] || null,
+    totalMarks: kv["Aggregate Marks"] || null,
+    Division: kv["Result/Division"] || null,
     subjects
   };
 }
@@ -302,40 +299,37 @@ function extractFullResult(html) {
 // ===============================
 async function getSessionData() {
   const res = await client.get(BASE_URL);
-
   const html = res.data;
+  const $ = cheerio.load(html);
+
   const rawCookies = res.headers["set-cookie"] || [];
   const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
-  const requestVerificationToken = extractRequestVerificationToken(html);
 
-  if (!requestVerificationToken) {
+  const RequestVerificationToken =
+    $('input[name="__RequestVerificationToken"]').val()?.trim() || "";
+
+  if (!RequestVerificationToken) {
     throw new Error("Could not fetch RequestVerificationToken");
   }
 
   return {
     cookieHeader,
-    requestVerificationToken
+    RequestVerificationToken
   };
 }
 
 // ===============================
 // FETCH ONE RESULT
 // ===============================
-async function fetchStudentResult(rollCode, rollNo) {
+async function fetchStudentResult(rollCode, rollNo, sessionData) {
   try {
-    // STEP 1: GET fresh session
-    const sessionData = await getSessionData();
-
-    const captchaValue = generateCaptcha();
-
     const payload = new URLSearchParams();
     payload.append("rollcode", String(rollCode));
     payload.append("rollno", String(rollNo));
-    payload.append("captcha", captchaValue);
-    payload.append("__RequestVerificationToken", sessionData.requestVerificationToken);
+    payload.append("captcha", generateCaptcha());
+    payload.append("__RequestVerificationToken", sessionData.RequestVerificationToken);
 
-    // STEP 2: POST form
-    const postRes = await client.post(POST_URL, payload.toString(), {
+    const res = await client.post(POST_URL, payload.toString(), {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "Cookie": sessionData.cookieHeader,
@@ -344,65 +338,35 @@ async function fetchStudentResult(rollCode, rollNo) {
       }
     });
 
-    let cookieHeader = mergeCookies(
-      sessionData.cookieHeader,
-      postRes.headers["set-cookie"] || []
-    );
+    const html = String(res.data || "");
+    const htmlLower = html.toLowerCase();
 
-    // STEP 3: If redirected, follow manually
-    let resultHtml = "";
+    const looksLikeFormPage =
+      htmlLower.includes("enter roll code") &&
+      htmlLower.includes("enter roll number") &&
+      htmlLower.includes("enter captcha") &&
+      !htmlLower.includes("student's name") &&
+      !htmlLower.includes("school/college name");
 
-    if (postRes.status >= 300 && postRes.status < 400 && postRes.headers.location) {
-      const location = postRes.headers.location.startsWith("http")
-        ? postRes.headers.location
-        : `https://interbiharboard.com${postRes.headers.location}`;
-
-      const followRes = await client.get(location, {
-        headers: {
-          "Cookie": cookieHeader,
-          "Referer": POST_URL
-        },
-        maxRedirects: 5
-      });
-
-      resultHtml = followRes.data;
-      cookieHeader = mergeCookies(cookieHeader, followRes.headers["set-cookie"] || []);
-    } else {
-      resultHtml = postRes.data;
+    if (
+      looksLikeFormPage ||
+      htmlLower.includes("incorrect captcha") ||
+      htmlLower.includes("please enter captcha") ||
+      htmlLower.includes("validation") ||
+      htmlLower.includes("token")
+    ) {
+      return { valid: false, retrySession: true };
     }
-
-    // STEP 4: If result page not directly returned, try ShowResult
-    const lower = String(resultHtml || "").toLowerCase();
-
-    const looksLikeFormAgain =
-      lower.includes("enter roll code") &&
-      lower.includes("enter roll number") &&
-      lower.includes("view result");
-
-    if (looksLikeFormAgain) {
-      const showRes = await client.get(SHOW_RESULT_URL, {
-        headers: {
-          "Cookie": cookieHeader,
-          "Referer": POST_URL
-        },
-        maxRedirects: 5
-      });
-
-      resultHtml = showRes.data;
-    }
-
-    const htmlLower = String(resultHtml || "").toLowerCase();
 
     if (
       htmlLower.includes("invalid") ||
       htmlLower.includes("no record") ||
-      htmlLower.includes("not found") ||
-      htmlLower.includes("incorrect captcha")
+      htmlLower.includes("not found")
     ) {
       return { valid: false };
     }
 
-    const result = extractFullResult(resultHtml);
+    const result = extractFullResult(html);
 
     if (
       result.studentName &&
@@ -473,9 +437,17 @@ function loadValidRollCodes() {
     let checkedInThisRollCode = 0;
     let savedInThisRollCode = 0;
 
+    let sessionData = await getSessionData();
+    let sessionUseCount = 0;
+
     console.log(`▶️ Checking Roll Code ${rollCode}`);
 
     while (currentRollNo <= ROLLNO_END) {
+      if (!sessionData || sessionUseCount >= 300) {
+        sessionData = await getSessionData();
+        sessionUseCount = 0;
+      }
+
       const batchEnd = Math.min(currentRollNo + BATCH_SIZE - 1, ROLLNO_END);
       const batchRollNos = [];
 
@@ -487,8 +459,16 @@ function loadValidRollCodes() {
         const chunk = batchRollNos.slice(i, i + CONCURRENCY);
 
         const results = await Promise.all(
-          chunk.map(rn => fetchStudentResult(rollCode, rn))
+          chunk.map(rn => fetchStudentResult(rollCode, rn, sessionData))
         );
+
+        sessionUseCount += chunk.length;
+
+        const retrySessionCount = results.filter(r => r.retrySession).length;
+        if (retrySessionCount >= Math.ceil(chunk.length * 0.5)) {
+          sessionData = await getSessionData();
+          sessionUseCount = 0;
+        }
 
         for (let j = 0; j < chunk.length; j++) {
           const rn = chunk[j];
