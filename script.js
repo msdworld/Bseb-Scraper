@@ -25,10 +25,10 @@ const ROLLNO_END = 26010999;
 const PARALLEL_ROLL_CODES = 10;
 
 // How many roll numbers per roll code in one round
-const ROUND_SIZE_PER_ROLLCODE = 150;
+const ROUND_SIZE_PER_ROLLCODE = 50;
 
 // Global request concurrency
-const CONCURRENCY = 150;
+const CONCURRENCY = 100;
 
 // Timeout per request
 const REQUEST_TIMEOUT = 7000;
@@ -44,7 +44,7 @@ const CONTINUOUS_FAIL_LIMIT = 20;
 // SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
 const START_INDEX = 1100;
-const END_INDEX = 1200;
+const END_INDEX = 1120;
 
 // ===============================
 // AXIOS CLIENT
