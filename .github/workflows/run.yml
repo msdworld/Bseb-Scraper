@@ -20,49 +20,23 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+
       - name: Show files before run
         run: ls -la
 
       - name: Run debug script
         run: node script.js
 
-      - name: Preview debug-form.html
-        if: always()
-        run: |
-          if [ -f debug-form.html ]; then
-            echo "===== debug-form.html (first 150 lines) ====="
-            head -n 150 debug-form.html
-          else
-            echo "debug-form.html not found"
-          fi
-
-      - name: Preview debug-result.html
-        if: always()
-        run: |
-          if [ -f debug-result.html ]; then
-            echo "===== debug-result.html (first 150 lines) ====="
-            head -n 150 debug-result.html
-          else
-            echo "debug-result.html not found"
-          fi
-
-      - name: Upload debug HTML files
+      - name: Upload debug/output files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: debug-html-files
+          name: debug-files
           path: |
-            debug-form.html
-            debug-result.html
-          if-no-files-found: warn
-
-      - name: Upload all debug text/json/log files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-extra-files
-          path: |
-            *.txt
+            *.html
             *.json
+            *.txt
             *.log
-          if-no-files-found: ignore
+          if-no-files-found: warn
