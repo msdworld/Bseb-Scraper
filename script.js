@@ -23,8 +23,8 @@ const FIRST_CHECK_LIMIT = 200;
 const CONTINUOUS_FAIL_LIMIT = 50;
 
 // Speed
-const CONCURRENCY = 500; // safer for this site, can try 30 later
-const BATCH_SIZE = 2000;
+const CONCURRENCY = 100; // safer for this site, can try 30 later
+const BATCH_SIZE = 400;
 const REQUEST_TIMEOUT = 12000;
 
 // Save
