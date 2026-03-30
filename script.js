@@ -35,8 +35,9 @@ function saveText(file, content) {
   ensureDir(OUT_DIR);
 
   const browser = await chromium.launch({
-    headless: false // IMPORTANT: keep false so you can manually enter captcha
-  });
+  headless: true,
+  args: ["--no-sandbox", "--disable-setuid-sandbox"]
+});
 
   const context = await browser.newContext({
     viewport: { width: 1400, height: 900 }
