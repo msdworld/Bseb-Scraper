@@ -18,13 +18,33 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm install axios cheerio
+        run: npm install
 
-      - name: Show files
+      - name: Show files before run
         run: ls -la
 
       - name: Run debug script
         run: node script.js
+
+      - name: Preview debug-form.html
+        if: always()
+        run: |
+          if [ -f debug-form.html ]; then
+            echo "===== debug-form.html (first 150 lines) ====="
+            head -n 150 debug-form.html
+          else
+            echo "debug-form.html not found"
+          fi
+
+      - name: Preview debug-result.html
+        if: always()
+        run: |
+          if [ -f debug-result.html ]; then
+            echo "===== debug-result.html (first 150 lines) ====="
+            head -n 150 debug-result.html
+          else
+            echo "debug-result.html not found"
+          fi
 
       - name: Upload debug HTML files
         if: always()
@@ -36,7 +56,7 @@ jobs:
             debug-result.html
           if-no-files-found: warn
 
-      - name: Upload all debug text/json files
+      - name: Upload all debug text/json/log files
         if: always()
         uses: actions/upload-artifact@v4
         with:
