@@ -22,8 +22,8 @@ const CONTINUOUS_FAIL_LIMIT = 20;
 
 // SPEED
 const ROLLCODE_PARALLEL = 10;   // NEW: how many roll codes run together
-const CONCURRENCY = 100;        // roll numbers per roll code at once
-const BATCH_SIZE = 100;
+const CONCURRENCY = 200;        // roll numbers per roll code at once
+const BATCH_SIZE = 200;
 const REQUEST_TIMEOUT = 8000;
 
 // Save
