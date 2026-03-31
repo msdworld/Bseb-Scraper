@@ -21,9 +21,9 @@ const FIRST_CHECK_LIMIT = 100;
 const CONTINUOUS_FAIL_LIMIT = 20;
 
 // SPEED
-const ROLLCODE_PARALLEL = 10;   // NEW: how many roll codes run together
-const CONCURRENCY = 200;        // roll numbers per roll code at once
-const BATCH_SIZE = 200;
+const ROLLCODE_PARALLEL = 20;   // NEW: how many roll codes run together
+const CONCURRENCY = 100;        // roll numbers per roll code at once
+const BATCH_SIZE = 100;
 const REQUEST_TIMEOUT = 8000;
 
 // Save
@@ -33,7 +33,7 @@ const SAVE_EVERY_VALID_RESULTS = 100;
 // SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
 const START_INDEX = 1130;
-const END_INDEX = 1200;
+const END_INDEX = 2000;
 
 // ===============================
 // AXIOS CLIENT
