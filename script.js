@@ -19,8 +19,8 @@ const ROLLNO_END = 26010999;
 // ===============================
 // RECOVERY MODE SETTINGS
 // ===============================
-const START_INDEX = 200;
-const END_INDEX = 1000; // all roll codes
+const START_INDEX = 800;
+const END_INDEX = 5000; // all roll codes
 
 const ROLL_CODE_GROUP_SIZE = 5;   // safe high speed
 const CONCURRENCY = 35;           // per roll code
