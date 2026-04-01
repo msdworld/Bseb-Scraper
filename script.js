@@ -6,40 +6,26 @@ const fs = require("fs");
 // CONFIG
 // ===============================
 const BASE_URL = "https://interbiharboard.com/";
+const GET_FORM_URL = "https://interbiharboard.com/";
 const POST_URL = "https://interbiharboard.com/Result/GetResult";
 
 const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
 const PROGRESS_FILE = "progress.txt";
-const BACKUP_FILE = "bseb-12th-full-result-2026.backup.json";
 
-// Roll number range
+// Full range per roll code
 const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
-// ===============================
-// SPEED SETTINGS
-// ===============================
-// Parallel roll codes at same time
-const PARALLEL_ROLL_CODES = 5;
-
-// Requests at once INSIDE one roll code
-const CONCURRENCY_PER_ROLL = 80;
-
-// How many roll numbers prepared in one loop
-const BATCH_SIZE = 300;
-
-// Request timeout
+// Speed / Stability
+const PARALLEL_ROLL_CODES = 4;     // increase later if stable
+const CONCURRENCY = 40;            // per roll code
+const BATCH_SIZE = 120;            // roll nos per session batch
 const REQUEST_TIMEOUT = 12000;
+const MAX_RETRIES = 3;
 
-// Save after every X new students
+// Save
 const SAVE_EVERY_VALID_RESULTS = 100;
-
-// Retry each student request
-const STUDENT_RETRY = 2;
-
-// Retry session fetch
-const SESSION_RETRY = 3;
 
 // ===============================
 // SPLIT RANGE (CHANGE EACH RUN)
@@ -63,9 +49,7 @@ const client = axios.create({
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
     "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Origin": "https://interbiharboard.com",
-    "Referer": "https://interbiharboard.com/"
+    "Upgrade-Insecure-Requests": "1"
   }
 });
 
@@ -76,37 +60,30 @@ function clean(txt) {
   return (txt || "").replace(/\s+/g, " ").trim();
 }
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 function getHidden($, name) {
-  return clean($(`[name="${name}"]`).val() || $(`#${name}`).val() || "");
+  return clean($(`input[name="${name}"]`).val() || "");
 }
 
 function generateCaptcha() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-function isLikelyLfsPointer(text) {
-  return typeof text === "string" &&
-    text.includes("version https://git-lfs.github.com/spec/v1");
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function loadJSON(file, fallback = {}) {
   if (!fs.existsSync(file)) return fallback;
 
   try {
-    const raw = fs.readFileSync(file, "utf8");
+    const raw = fs.readFileSync(file, "utf8").trim();
 
-    if (!raw.trim()) {
-      console.log(`⚠️ ${file} is empty. Using fallback.`);
-      return fallback;
-    }
+    if (!raw) return fallback;
 
-    if (isLikelyLfsPointer(raw)) {
-      console.log(`❌ ${file} is a Git LFS pointer, not real JSON.`);
-      console.log(`⚠️ Using fallback so data is not overwritten blindly.`);
+    // If Git LFS pointer file accidentally loaded
+    if (raw.startsWith("version https://git-lfs.github.com/spec/v1")) {
+      console.log(`❌ ${file} is currently a Git LFS pointer file, not real JSON.`);
+      console.log(`⚠️ Download/restore actual JSON before running scraper.`);
       return fallback;
     }
 
@@ -117,12 +94,8 @@ function loadJSON(file, fallback = {}) {
   }
 }
 
-function saveBackup(file, data) {
-  try {
-    saveCustomJSON(file, data);
-  } catch (e) {
-    console.log(`⚠️ Backup save failed: ${e.message}`);
-  }
+function saveProgress(msg) {
+  fs.writeFileSync(PROGRESS_FILE, msg + "\n", "utf8");
 }
 
 function detectAdditionalSection(text) {
@@ -151,7 +124,7 @@ function formatStudent(student, indent = "    ") {
   lines.push(`${indent}"Division": ${JSON.stringify(student.Division)},`);
   lines.push(`${indent}"subjects": [`);
 
-  const subjectLines = (student.subjects || []).map((sub) => {
+  const subjectLines = student.subjects.map((sub) => {
     const ordered = {};
     ordered.subject = sub.subject;
     ordered.FMarks = sub.FMarks;
@@ -208,10 +181,6 @@ function countTotalStudentsSaved(fullResults) {
   return total;
 }
 
-function writeProgress(text) {
-  fs.writeFileSync(PROGRESS_FILE, text + "\n", "utf8");
-}
-
 // ===============================
 // SUBJECT PARSER
 // ===============================
@@ -240,7 +209,8 @@ function parseSubjects($) {
       row1Text.includes("full marks") &&
       row1Text.includes("pass marks") &&
       row1Text.includes("theory") &&
-      row1Text.includes("subject total");
+      row1Text.includes("subject total") &&
+      row2Text.includes("th.");
 
     if (!isMarksTable) return;
     marksTableFound = true;
@@ -257,7 +227,7 @@ function parseSubjects($) {
         continue;
       }
 
-      if (cells.length < 5) continue;
+      if (cells.length < 7) continue;
 
       const subjectName = clean(cells[0]);
       if (!subjectName) continue;
@@ -277,7 +247,6 @@ function parseSubjects($) {
       if (practical !== "") obj.practical = practical;
       if (regulationTheory !== "") obj.regulationTheory = regulationTheory;
       if (regulationPractical !== "") obj.regulationPractical = regulationPractical;
-
       if (currentAdditionalSection) obj.extra = currentAdditionalSection;
 
       subjects.push(obj);
@@ -311,24 +280,34 @@ function extractFullResult(html) {
   const subjects = parseSubjects($);
 
   return {
-    studentName: kv["Student's Name"] || kv["Student Name"] || null,
-    fatherName: kv["Father's Name"] || kv["Father Name"] || null,
+    studentName: kv["Student's Name"] || null,
+    fatherName: kv["Father's Name"] || null,
     regNumber: kv["Registration Number"] || null,
-    BSEBUniqueId: kv["BSEB Unique Id"] || kv["BSEB Unique ID"] || null,
-    schoolName: kv["School/College Name"] || kv["School Name"] || null,
+    BSEBUniqueId: kv["BSEB Unique Id"] || null,
+    schoolName: kv["School/College Name"] || null,
     rollCode: kv["Roll Code"] || null,
     rollNo: kv["Roll Number"] || null,
-    stream: kv["Faculty"] || kv["Stream"] || null,
-    totalMarks: kv["Aggregate Marks"] || kv["Total Marks"] || null,
-    Division: kv["Result/Division"] || kv["Division"] || kv["Result"] || null,
+    stream: kv["Faculty"] || null,
+    totalMarks: kv["Aggregate Marks"] || null,
+    Division: kv["Result/Division"] || null,
     subjects
   };
+}
+
+function looksLikeFormPage(html) {
+  const t = String(html || "").toLowerCase();
+  return (
+    t.includes("enter roll code") &&
+    t.includes("enter roll number") &&
+    t.includes("captcha")
+  );
 }
 
 function isValidResult(result, rollCode, rollNo) {
   return (
     result &&
     result.studentName &&
+    result.schoolName &&
     String(result.rollCode) === String(rollCode) &&
     String(result.rollNo) === String(rollNo)
   );
@@ -337,10 +316,10 @@ function isValidResult(result, rollCode, rollNo) {
 // ===============================
 // SESSION FETCH
 // ===============================
-async function getSessionData() {
-  for (let attempt = 1; attempt <= SESSION_RETRY; attempt++) {
+async function getSessionData(retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const res = await client.get(BASE_URL);
+      const res = await client.get(GET_FORM_URL);
       const html = res.data;
       const $ = cheerio.load(html);
 
@@ -349,8 +328,8 @@ async function getSessionData() {
 
       const token = getHidden($, "__RequestVerificationToken");
 
-      if (!token || !cookieHeader) {
-        throw new Error("Token or cookie missing");
+      if (!token) {
+        throw new Error("Could not fetch RequestVerificationToken");
       }
 
       return {
@@ -358,8 +337,8 @@ async function getSessionData() {
         token
       };
     } catch (err) {
-      if (attempt === SESSION_RETRY) throw err;
-      await sleep(500 * attempt);
+      if (attempt === retries) throw err;
+      await sleep(1000 * attempt);
     }
   }
 }
@@ -367,8 +346,8 @@ async function getSessionData() {
 // ===============================
 // FETCH ONE RESULT
 // ===============================
-async function fetchStudentResult(rollCode, rollNo, sessionData) {
-  for (let attempt = 1; attempt <= STUDENT_RETRY; attempt++) {
+async function fetchStudentResult(rollCode, rollNo, sessionData, retries = MAX_RETRIES) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const payload = new URLSearchParams();
       payload.append("rollcode", String(rollCode));
@@ -380,33 +359,27 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           "Cookie": sessionData.cookieHeader,
-          "Referer": BASE_URL,
+          "Referer": GET_FORM_URL,
           "Origin": "https://interbiharboard.com"
         }
       });
 
       const html = String(res.data || "");
-      const htmlLower = html.toLowerCase();
+      const lower = html.toLowerCase();
 
-      if (
-        htmlLower.includes("incorrect captcha") ||
-        htmlLower.includes("please enter correct captcha") ||
-        htmlLower.includes("invalid captcha")
-      ) {
-        return { valid: false, reason: "captcha" };
+      // If site sent form page again, session/token likely failed
+      if (looksLikeFormPage(html)) {
+        if (attempt === retries) return { valid: false, reason: "form_returned" };
+        await sleep(400 * attempt);
+        continue;
       }
 
       if (
-        htmlLower.includes("invalid") ||
-        htmlLower.includes("no record") ||
-        htmlLower.includes("not found") ||
-        htmlLower.includes("roll code") && htmlLower.includes("roll number")
+        lower.includes("invalid") ||
+        lower.includes("no record") ||
+        lower.includes("not found")
       ) {
-        const result = extractFullResult(html);
-        if (isValidResult(result, rollCode, rollNo)) {
-          return { valid: true, data: result };
-        }
-        return { valid: false, reason: "notfound" };
+        return { valid: false, reason: "invalid" };
       }
 
       const result = extractFullResult(html);
@@ -415,16 +388,21 @@ async function fetchStudentResult(rollCode, rollNo, sessionData) {
         return { valid: true, data: result };
       }
 
-      return { valid: false, reason: "unknown" };
-    } catch (err) {
-      if (attempt === STUDENT_RETRY) {
-        return { valid: false, reason: "error" };
+      // If page exists but parsing failed, retry
+      if (attempt === retries) {
+        return { valid: false, reason: "parse_fail" };
       }
-      await sleep(200 * attempt);
+
+      await sleep(300 * attempt);
+    } catch (err) {
+      if (attempt === retries) {
+        return { valid: false, reason: "request_fail" };
+      }
+      await sleep(500 * attempt);
     }
   }
 
-  return { valid: false, reason: "error" };
+  return { valid: false, reason: "unknown" };
 }
 
 // ===============================
@@ -438,48 +416,42 @@ function loadValidRollCodes() {
 }
 
 // ===============================
-// PROCESS ONE ROLL CODE (FULL RECHECK)
+// PROCESS ONE ROLL CODE
 // ===============================
-async function processRollCode(rollCode, fullResults, state) {
+async function processRollCode(rollCode, fullResults, counters) {
   if (!fullResults[rollCode]) fullResults[rollCode] = {};
 
-  const alreadySaved = Object.keys(fullResults[rollCode]).length;
-  console.log(`▶️ Rechecking Roll Code ${rollCode} (already saved: ${alreadySaved})`);
+  const alreadySavedRollNos = new Set(Object.keys(fullResults[rollCode]));
+  const alreadySavedCount = alreadySavedRollNos.size;
 
-  let foundNow = 0;
-  let checkedNow = 0;
-  let skippedAlreadySaved = 0;
+  console.log(`▶️ Rechecking Roll Code ${rollCode} (already saved: ${alreadySavedCount})`);
 
-  let currentRollNo = ROLLNO_START;
+  let newSaved = 0;
+  let skippedExisting = 0;
+  let checkedNew = 0;
 
-  while (currentRollNo <= ROLLNO_END) {
-    const batchEnd = Math.min(currentRollNo + BATCH_SIZE - 1, ROLLNO_END);
-    const batchRollNos = [];
-
-    for (let rn = currentRollNo; rn <= batchEnd; rn++) {
-      if (fullResults[rollCode][rn]) {
-        skippedAlreadySaved++;
-        continue;
-      }
-      batchRollNos.push(rn);
-    }
-
-    if (batchRollNos.length === 0) {
-      currentRollNo = batchEnd + 1;
-      continue;
-    }
+  for (let start = ROLLNO_START; start <= ROLLNO_END; start += BATCH_SIZE) {
+    const end = Math.min(start + BATCH_SIZE - 1, ROLLNO_END);
 
     let sessionData;
     try {
       sessionData = await getSessionData();
     } catch (err) {
-      console.log(`⚠️ Session fetch failed for ${rollCode}, retrying batch...`);
-      await sleep(1000);
+      console.log(`⚠️ ${rollCode} session fetch failed for batch ${start}-${end}`);
       continue;
     }
 
-    for (let i = 0; i < batchRollNos.length; i += CONCURRENCY_PER_ROLL) {
-      const chunk = batchRollNos.slice(i, i + CONCURRENCY_PER_ROLL);
+    const batchRollNos = [];
+    for (let rn = start; rn <= end; rn++) {
+      if (alreadySavedRollNos.has(String(rn))) {
+        skippedExisting++;
+        continue;
+      }
+      batchRollNos.push(rn);
+    }
+
+    for (let i = 0; i < batchRollNos.length; i += CONCURRENCY) {
+      const chunk = batchRollNos.slice(i, i + CONCURRENCY);
 
       const results = await Promise.all(
         chunk.map(rn => fetchStudentResult(rollCode, rn, sessionData))
@@ -488,40 +460,35 @@ async function processRollCode(rollCode, fullResults, state) {
       for (let j = 0; j < chunk.length; j++) {
         const rn = chunk[j];
         const result = results[j];
-        checkedNow++;
+        checkedNew++;
 
-        if (result.valid && result.data) {
-          if (!fullResults[rollCode][rn]) {
-            fullResults[rollCode][rn] = result.data;
-            foundNow++;
-            state.unsavedValidCount++;
-            state.totalStudentsSaved++;
+        if (result.valid && !fullResults[rollCode][rn]) {
+          fullResults[rollCode][rn] = result.data;
+          alreadySavedRollNos.add(String(rn));
+          newSaved++;
+          counters.totalStudentsSaved++;
+          counters.unsavedValidCount++;
 
-            console.log(`   ✅ ${rollCode}-${rn} saved`);
-          }
+          console.log(`   ✅ ${rollCode} → Found & saved ${rn}`);
         }
       }
 
-      if (state.unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
-        saveBackup(BACKUP_FILE, fullResults);
+      if (counters.unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
         saveCustomJSON(OUTPUT_FILE, fullResults);
-        writeProgress(`Last save: RollCode ${rollCode} | Total Saved: ${state.totalStudentsSaved}`);
-        console.log(`💾 Progress Saved | Total Saved: ${state.totalStudentsSaved}`);
-        state.unsavedValidCount = 0;
+        saveProgress(`Last save | Total Saved: ${counters.totalStudentsSaved}`);
+        console.log(`💾 Progress Saved | Total Saved: ${counters.totalStudentsSaved}`);
+        counters.unsavedValidCount = 0;
       }
     }
-
-    currentRollNo = batchEnd + 1;
   }
 
-  if (foundNow > 0) {
-    saveBackup(BACKUP_FILE, fullResults);
+  if (newSaved > 0) {
     saveCustomJSON(OUTPUT_FILE, fullResults);
-    writeProgress(`Completed RollCode ${rollCode} | Total Saved: ${state.totalStudentsSaved}`);
-    console.log(`✅ Roll Code ${rollCode} finished | New Saved: ${foundNow} | Already Had: ${alreadySaved} | Total Now: ${alreadySaved + foundNow}`);
-    state.unsavedValidCount = 0;
+    saveProgress(`Roll Code ${rollCode} completed | Total Saved: ${counters.totalStudentsSaved}`);
+    counters.unsavedValidCount = 0;
+    console.log(`✅ Roll Code ${rollCode} finished | New Saved: ${newSaved} | Already had: ${alreadySavedCount} | Skipped existing: ${skippedExisting}`);
   } else {
-    console.log(`⚠️ Roll Code ${rollCode} finished | No new student saved | Already had: ${alreadySaved} | Skipped existing: ${skippedAlreadySaved}`);
+    console.log(`⚠️ Roll Code ${rollCode} finished | No new student saved | Already had: ${alreadySavedCount} | Skipped existing: ${skippedExisting}`);
   }
 }
 
@@ -544,9 +511,7 @@ async function processRollCode(rollCode, fullResults, state) {
   }
 
   const fullResults = loadJSON(OUTPUT_FILE, {});
-  saveBackup(BACKUP_FILE, fullResults);
-
-  const state = {
+  const counters = {
     totalStudentsSaved: countTotalStudentsSaved(fullResults),
     unsavedValidCount: 0
   };
@@ -555,27 +520,22 @@ async function processRollCode(rollCode, fullResults, state) {
   console.log(`📚 Total valid roll codes available: ${allValidRollCodes.length}`);
   console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
   console.log(`📦 Roll codes in this run: ${selectedRollCodes.length}`);
-  console.log(`📦 Already saved students in JSON: ${state.totalStudentsSaved}`);
+  console.log(`📦 Already saved students in JSON: ${counters.totalStudentsSaved}`);
   console.log(`⚡ Parallel roll codes: ${PARALLEL_ROLL_CODES}`);
-  console.log(`⚡ Concurrency per roll code: ${CONCURRENCY_PER_ROLL}`);
+  console.log(`⚡ Concurrency per roll code: ${CONCURRENCY}`);
 
   for (let i = 0; i < selectedRollCodes.length; i += PARALLEL_ROLL_CODES) {
     const group = selectedRollCodes.slice(i, i + PARALLEL_ROLL_CODES);
+
     console.log(`\n🚀 Starting roll code group: ${group.join(", ")}`);
 
     await Promise.all(
-      group.map(rollCode => processRollCode(rollCode, fullResults, state))
+      group.map(rollCode => processRollCode(rollCode, fullResults, counters))
     );
-
-    saveBackup(BACKUP_FILE, fullResults);
-    saveCustomJSON(OUTPUT_FILE, fullResults);
-    writeProgress(`Completed group ending at index ${i + group.length - 1} | Total Saved: ${state.totalStudentsSaved}`);
-    console.log(`💾 Group Saved | Total Saved: ${state.totalStudentsSaved}`);
   }
 
-  saveBackup(BACKUP_FILE, fullResults);
   saveCustomJSON(OUTPUT_FILE, fullResults);
-  writeProgress(`FULL RECHECK COMPLETED | Total Saved: ${state.totalStudentsSaved}`);
+  saveProgress(`Completed range ${START_INDEX}-${END_INDEX} | Total Saved: ${counters.totalStudentsSaved}`);
 
-  console.log(`\n🎉 FULL RECHECK COMPLETED | Total Saved: ${state.totalStudentsSaved}`);
+  console.log(`\n🎉 FULL RECHECK COMPLETED | Range ${START_INDEX}-${END_INDEX} | Total Saved: ${counters.totalStudentsSaved}`);
 })();
