@@ -1,0 +1,39 @@
+name: Restore Old JSON File
+
+on:
+  workflow_dispatch:
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore old JSON from good commit
+        run: |
+          GOOD_COMMIT="sha256:62baf2c20183c71c4c5436c46812c49a655a15de6bad40ba1e8e6c6638a8c8eb"
+          git checkout $GOOD_COMMIT -- bseb-12th-full-result-2026.json
+
+      - name: Show restored file info
+        run: |
+          echo "===== FILE SIZE ====="
+          du -h bseb-12th-full-result-2026.json || echo "File not found"
+
+          echo "===== FILE START ====="
+          head -n 20 bseb-12th-full-result-2026.json || echo "Could not read file"
+
+      - name: Commit and Push Restored File
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add bseb-12th-full-result-2026.json
+          git commit -m "Restore correct BSEB full result JSON" || echo "No changes to commit"
+          git push
