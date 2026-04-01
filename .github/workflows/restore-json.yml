@@ -11,7 +11,13 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
+          lfs: true
           fetch-depth: 1
+
+      - name: Pull Git LFS files
+        run: |
+          git lfs install
+          git lfs pull
 
       - name: Show File Info
         run: |
@@ -20,6 +26,9 @@ jobs:
           echo ""
           echo "===== JSON FILE SIZE ====="
           du -h bseb-12th-full-result-2026.json || echo "JSON file not found"
+          echo ""
+          echo "===== FIRST 5 LINES OF JSON FILE ====="
+          head -n 5 bseb-12th-full-result-2026.json || true
 
       - name: Check JSON Data
         run: |
@@ -40,6 +49,8 @@ jobs:
             data = JSON.parse(raw);
           } catch (e) {
             console.log("❌ JSON parse failed:", e.message);
+            console.log("\n===== FILE START PREVIEW =====");
+            console.log(raw.slice(0, 500));
             process.exit(1);
           }
 
