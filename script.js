@@ -18,15 +18,19 @@ const PROGRESS_FILE = "progress.txt";
 const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
-// Speed
-const ROLL_CODE_PARALLEL = 8;      // how many roll codes at once
-const CONCURRENCY_PER_ROLL = 80;   // how many rollnos at once per roll code
-const REQUEST_TIMEOUT = 8000;
+// Split
+const START_INDEX = 200;
+const END_INDEX = 300;
+
+// SPEED / STABILITY
+const ROLL_CODE_PARALLEL = 5;       // safer than 8
+const CONCURRENCY_PER_ROLL = 120;   // keep result speed high
+const REQUEST_TIMEOUT = 15000;      // more stable than 8000
 const SAVE_EVERY_VALID_RESULTS = 100;
 
-// Split
-const START_INDEX = 250;
-const END_INDEX = 300;
+// Retry
+const SESSION_RETRY = 3;
+const REQUEST_RETRY = 2;
 
 // ===============================
 // AXIOS CLIENT
@@ -55,11 +59,28 @@ function clean(txt) {
   return (txt || "").replace(/\s+/g, " ").trim();
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isLikelyLFSPointer(text) {
+  const t = String(text || "").trim();
+  return t.startsWith("version https://git-lfs.github.com/spec/v1");
+}
+
 function loadJSON(file, fallback = {}) {
   if (!fs.existsSync(file)) return fallback;
+
   try {
     const raw = fs.readFileSync(file, "utf8").trim();
     if (!raw) return fallback;
+
+    if (isLikelyLFSPointer(raw)) {
+      console.log(`❌ ${file} is Git LFS pointer, not actual JSON.`);
+      console.log(`⚠️ Your real big JSON file was NOT pulled into this workflow.`);
+      return fallback;
+    }
+
     return JSON.parse(raw);
   } catch (err) {
     console.log(`❌ Failed to parse ${file}: ${err.message}`);
@@ -84,7 +105,7 @@ function countTotalStudentsSaved(fullResults) {
 }
 
 // ===============================
-// SAFE SAVE (VERY IMPORTANT)
+// SAFE SAVE
 // ===============================
 function formatStudent(student, indent = "    ") {
   const lines = [];
@@ -157,14 +178,17 @@ function saveCustomJSON(file, data) {
   }
 
   if (fs.existsSync(file)) {
-    fs.copyFileSync(file, BACKUP_FILE);
+    const currentRaw = fs.readFileSync(file, "utf8");
+    if (!isLikelyLFSPointer(currentRaw)) {
+      fs.copyFileSync(file, BACKUP_FILE);
+    }
   }
 
   fs.renameSync(tempFile, file);
 }
 
 // ===============================
-// PARSING
+// PARSE RESULT
 // ===============================
 function detectAdditionalSection(text) {
   const t = clean(text).toLowerCase();
@@ -280,82 +304,94 @@ function extractFullResult(html) {
 // SESSION
 // ===============================
 async function getSessionData() {
-  const res = await client.get(FORM_URL);
-  const html = res.data;
-  const $ = cheerio.load(html);
+  for (let attempt = 1; attempt <= SESSION_RETRY; attempt++) {
+    try {
+      const res = await client.get(FORM_URL);
+      const html = res.data;
+      const $ = cheerio.load(html);
 
-  const rawCookies = res.headers["set-cookie"] || [];
-  const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
+      const rawCookies = res.headers["set-cookie"] || [];
+      const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
 
-  const token =
-    $('input[name="__RequestVerificationToken"]').val() ||
-    $('input[name="__RequestVerificationToken"]').attr("value") ||
-    "";
+      const token =
+        $('input[name="__RequestVerificationToken"]').val() ||
+        $('input[name="__RequestVerificationToken"]').attr("value") ||
+        "";
 
-  if (!token) {
-    throw new Error("Could not fetch RequestVerificationToken");
+      if (!token) {
+        throw new Error("Could not fetch RequestVerificationToken");
+      }
+
+      return { cookieHeader, token };
+    } catch (err) {
+      if (attempt === SESSION_RETRY) throw err;
+      console.log(`   🔁 Session retry ${attempt}/${SESSION_RETRY}`);
+      await sleep(1200 * attempt);
+    }
   }
-
-  return {
-    cookieHeader,
-    token
-  };
 }
 
 // ===============================
-// FETCH ONE STUDENT
+// FETCH ONE RESULT
 // ===============================
 async function fetchStudentResult(rollCode, rollNo, sessionData) {
-  try {
-    const payload = new URLSearchParams();
-    payload.append("rollcode", String(rollCode));
-    payload.append("rollno", String(rollNo));
-    payload.append("captcha", generateCaptcha());
-    payload.append("__RequestVerificationToken", sessionData.token);
+  for (let attempt = 1; attempt <= REQUEST_RETRY; attempt++) {
+    try {
+      const payload = new URLSearchParams();
+      payload.append("rollcode", String(rollCode));
+      payload.append("rollno", String(rollNo));
+      payload.append("captcha", generateCaptcha());
+      payload.append("__RequestVerificationToken", sessionData.token);
 
-    const res = await client.post(POST_URL, payload.toString(), {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Cookie": sessionData.cookieHeader,
-        "Referer": FORM_URL,
-        "Origin": "https://interbiharboard.com"
+      const res = await client.post(POST_URL, payload.toString(), {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Cookie": sessionData.cookieHeader,
+          "Referer": FORM_URL,
+          "Origin": "https://interbiharboard.com"
+        }
+      });
+
+      const html = String(res.data || "");
+      const htmlLower = html.toLowerCase();
+
+      if (
+        htmlLower.includes("incorrect captcha") ||
+        htmlLower.includes("please enter captcha") ||
+        htmlLower.includes("please enter roll code") ||
+        htmlLower.includes("please enter roll number")
+      ) {
+        return { valid: false, retryable: true };
       }
-    });
 
-    const html = String(res.data || "");
-    const htmlLower = html.toLowerCase();
+      if (
+        htmlLower.includes("invalid") ||
+        htmlLower.includes("no record") ||
+        htmlLower.includes("not found")
+      ) {
+        return { valid: false, retryable: false };
+      }
 
-    if (
-      htmlLower.includes("incorrect captcha") ||
-      htmlLower.includes("please enter captcha") ||
-      htmlLower.includes("please enter roll code") ||
-      htmlLower.includes("please enter roll number")
-    ) {
-      return { valid: false, retryable: true };
-    }
+      const result = extractFullResult(html);
 
-    if (
-      htmlLower.includes("invalid") ||
-      htmlLower.includes("no record") ||
-      htmlLower.includes("not found")
-    ) {
+      if (
+        result.studentName &&
+        String(result.rollCode) === String(rollCode) &&
+        String(result.rollNo) === String(rollNo)
+      ) {
+        return { valid: true, data: result };
+      }
+
       return { valid: false, retryable: false };
+    } catch (err) {
+      if (attempt === REQUEST_RETRY) {
+        return { valid: false, retryable: true };
+      }
+      await sleep(300 * attempt);
     }
-
-    const result = extractFullResult(html);
-
-    if (
-      result.studentName &&
-      String(result.rollCode) === String(rollCode) &&
-      String(result.rollNo) === String(rollNo)
-    ) {
-      return { valid: true, data: result };
-    }
-
-    return { valid: false, retryable: false };
-  } catch {
-    return { valid: false, retryable: true };
   }
+
+  return { valid: false, retryable: true };
 }
 
 // ===============================
@@ -369,7 +405,7 @@ function loadValidRollCodes() {
 }
 
 // ===============================
-// PROCESS ONE ROLL CODE (FULL RECHECK)
+// PROCESS ONE ROLL CODE
 // ===============================
 async function processRollCode(rollCode, fullResults, state) {
   if (!fullResults[rollCode]) fullResults[rollCode] = {};
@@ -379,8 +415,6 @@ async function processRollCode(rollCode, fullResults, state) {
 
   console.log(`▶️ Rechecking Roll Code ${rollCode} (already saved: ${alreadySavedCount})`);
 
-  let sessionData = await getSessionData();
-
   const missingRollNos = [];
   for (let rn = ROLLNO_START; rn <= ROLLNO_END; rn++) {
     if (!fullResults[rollCode][rn]) {
@@ -389,9 +423,11 @@ async function processRollCode(rollCode, fullResults, state) {
   }
 
   if (!missingRollNos.length) {
-    console.log(`✅ ${rollCode} already complete (999/999 checked & saved where valid)`);
+    console.log(`✅ ${rollCode} already complete`);
     return;
   }
+
+  let sessionData = await getSessionData();
 
   for (let i = 0; i < missingRollNos.length; i += CONCURRENCY_PER_ROLL) {
     const chunk = missingRollNos.slice(i, i + CONCURRENCY_PER_ROLL);
@@ -400,7 +436,6 @@ async function processRollCode(rollCode, fullResults, state) {
       chunk.map(rn => fetchStudentResult(rollCode, rn, sessionData))
     );
 
-    // Retry only failed/retryable ones with fresh session
     const retryIndexes = [];
     for (let j = 0; j < results.length; j++) {
       if (!results[j].valid && results[j].retryable) {
@@ -471,10 +506,8 @@ async function processRollCode(rollCode, fullResults, state) {
   }
 
   const fullResults = loadJSON(OUTPUT_FILE, {});
-  let totalStudentsSaved = countTotalStudentsSaved(fullResults);
-
   const state = {
-    totalStudentsSaved,
+    totalStudentsSaved: countTotalStudentsSaved(fullResults),
     unsavedValidCount: 0
   };
 
@@ -491,9 +524,13 @@ async function processRollCode(rollCode, fullResults, state) {
 
     console.log(`\n🚀 Starting roll code group: ${group.join(", ")}`);
 
-    await Promise.all(
-      group.map(rc => processRollCode(rc, fullResults, state))
-    );
+    for (const rc of group) {
+      try {
+        await processRollCode(rc, fullResults, state);
+      } catch (err) {
+        console.log(`❌ Roll Code ${rc} failed: ${err.message}`);
+      }
+    }
 
     saveCustomJSON(OUTPUT_FILE, fullResults);
     writeProgress(`Completed group ending at index ${i + group.length - 1} | Total Saved: ${state.totalStudentsSaved}`);
