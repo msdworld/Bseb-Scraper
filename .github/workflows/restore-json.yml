@@ -18,7 +18,7 @@ jobs:
 
       - name: Restore old JSON from good commit
         run: |
-          GOOD_COMMIT="sha256:62baf2c20183c71c4c5436c46812c49a655a15de6bad40ba1e8e6c6638a8c8eb"
+          GOOD_COMMIT="9cf77ddb988dfe7fbff050a37a612193f5782cbf"
           git checkout $GOOD_COMMIT -- bseb-12th-full-result-2026.json
 
       - name: Show restored file info
