@@ -1,4 +1,4 @@
-name: BSEB Recheck Missing Students
+name: BSEB Recheck Full Result
 
 on:
   workflow_dispatch:
@@ -6,7 +6,6 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     permissions:
       contents: write
@@ -15,13 +14,8 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
-          lfs: true
           persist-credentials: true
-
-      - name: Pull Git LFS files
-        run: |
-          git lfs install
-          git lfs pull
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -41,9 +35,9 @@ jobs:
           ls -lah
           echo ""
           echo "===== JSON FILE SIZE ====="
-          du -h bseb-12th-full-result-2026.json || echo "JSON file not found"
+          du -h bseb-12th-full-result-2026.json || echo "JSON not found"
           echo ""
-          echo "===== PROGRESS FILE ====="
+          echo "===== PROGRESS ====="
           cat progress.txt || echo "Progress file not found"
 
       - name: Commit and Push Results
@@ -52,17 +46,8 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add bseb-12th-full-result-2026.json progress.txt package-lock.json
-          git commit -m "Recheck missing BSEB students" || echo "No changes to commit"
+          git add bseb-12th-full-result-2026.json progress.txt bseb-12th-full-result-2026.backup.json
+          git commit -m "Update BSEB recheck data" || echo "No changes to commit"
 
           git pull --rebase origin main || true
           git push
-
-      - name: Upload Result Files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bseb-recheck-output
-          path: |
-            bseb-12th-full-result-2026.json
-            progress.txt
