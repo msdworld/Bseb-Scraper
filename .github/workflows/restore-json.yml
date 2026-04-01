@@ -1,39 +1,73 @@
-name: Restore Old JSON File
+- name: Deep JSON Validation Test
+  run: |
+    node - <<'EOF'
+    const fs = require("fs");
 
-on:
-  workflow_dispatch:
+    const FILE = "bseb-12th-full-result-2026.json";
 
-jobs:
-  restore:
-    runs-on: ubuntu-latest
+    if (!fs.existsSync(FILE)) {
+      console.log("❌ JSON file not found");
+      process.exit(1);
+    }
 
-    permissions:
-      contents: write
+    const raw = fs.readFileSync(FILE, "utf8");
 
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    console.log("===== FILE SIZE =====");
+    const stats = fs.statSync(FILE);
+    console.log(`Bytes: ${stats.size}`);
+    console.log(`MB: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
 
-      - name: Restore old JSON from good commit
-        run: |
-          GOOD_COMMIT="9cf77ddb988dfe7fbff050a37a612193f5782cbf"
-          git checkout $GOOD_COMMIT -- bseb-12th-full-result-2026.json
+    let data;
+    try {
+      data = JSON.parse(raw);
+      console.log("✅ JSON PARSE: SUCCESS");
+    } catch (err) {
+      console.log("❌ JSON PARSE FAILED");
+      console.log(err.message);
+      process.exit(1);
+    }
 
-      - name: Show restored file info
-        run: |
-          echo "===== FILE SIZE ====="
-          du -h bseb-12th-full-result-2026.json || echo "File not found"
+    const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
+    console.log(`📚 Total Roll Codes: ${rollCodes.length}`);
 
-          echo "===== FILE START ====="
-          head -n 20 bseb-12th-full-result-2026.json || echo "Could not read file"
+    let totalStudents = 0;
+    let lastStudents = [];
 
-      - name: Commit and Push Restored File
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+    for (const rollCode of rollCodes) {
+      const students = data[rollCode] || {};
+      const rollNos = Object.keys(students).sort((a, b) => Number(a) - Number(b));
 
-          git add bseb-12th-full-result-2026.json
-          git commit -m "Restore correct BSEB full result JSON" || echo "No changes to commit"
-          git push
+      totalStudents += rollNos.length;
+
+      for (const rollNo of rollNos) {
+        lastStudents.push({
+          rollCode,
+          rollNo,
+          student: students[rollNo]
+        });
+
+        if (lastStudents.length > 2) {
+          lastStudents.shift();
+        }
+      }
+    }
+
+    console.log(`👨‍🎓 Total Students Saved: ${totalStudents}`);
+
+    console.log("\n===== LAST 2 STUDENTS =====");
+    if (lastStudents.length === 0) {
+      console.log("⚠️ No students found in file");
+    } else {
+      lastStudents.forEach((entry, i) => {
+        console.log(`\n[${i + 1}] Roll Code: ${entry.rollCode} | Roll No: ${entry.rollNo}`);
+        console.log(JSON.stringify(entry.student, null, 2));
+      });
+    }
+
+    console.log("\n===== LAST 10 ROLL CODES SUMMARY =====");
+    const last10RollCodes = rollCodes.slice(-10);
+    for (const rc of last10RollCodes) {
+      const count = Object.keys(data[rc] || {}).length;
+      console.log(`${rc}: ${count} students`);
+    }
+    EOF
