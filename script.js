@@ -19,8 +19,8 @@ const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
 // Split
-const START_INDEX = 200;
-const END_INDEX = 300;
+const START_INDEX = 300;
+const END_INDEX = 350;
 
 // SPEED / STABILITY
 const ROLL_CODE_PARALLEL = 5;       // safer than 8
