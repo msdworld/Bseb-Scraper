@@ -70,4 +70,4 @@
       const count = Object.keys(data[rc] || {}).length;
       console.log(`${rc}: ${count} students`);
     }
-    EOF
+  
