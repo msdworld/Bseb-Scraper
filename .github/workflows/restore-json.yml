@@ -1,73 +1,89 @@
-- name: Deep JSON Validation Test
-  run: |
-    node - <<'EOF'
-    const fs = require("fs");
+name: Check JSON Integrity
 
-    const FILE = "bseb-12th-full-result-2026.json";
+on:
+  workflow_dispatch:
 
-    if (!fs.existsSync(FILE)) {
-      console.log("❌ JSON file not found");
-      process.exit(1);
-    }
+jobs:
+  check-json:
+    runs-on: ubuntu-latest
 
-    const raw = fs.readFileSync(FILE, "utf8");
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-    console.log("===== FILE SIZE =====");
-    const stats = fs.statSync(FILE);
-    console.log(`Bytes: ${stats.size}`);
-    console.log(`MB: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+      - name: Show File Info
+        run: |
+          echo "===== ROOT FILES ====="
+          ls -lah
+          echo ""
+          echo "===== JSON FILE SIZE ====="
+          du -h bseb-12th-full-result-2026.json || echo "JSON file not found"
 
-    let data;
-    try {
-      data = JSON.parse(raw);
-      console.log("✅ JSON PARSE: SUCCESS");
-    } catch (err) {
-      console.log("❌ JSON PARSE FAILED");
-      console.log(err.message);
-      process.exit(1);
-    }
+      - name: Check JSON Data
+        run: |
+          node - <<'EOF'
+          const fs = require("fs");
 
-    const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-    console.log(`📚 Total Roll Codes: ${rollCodes.length}`);
+          const FILE = "bseb-12th-full-result-2026.json";
 
-    let totalStudents = 0;
-    let lastStudents = [];
+          if (!fs.existsSync(FILE)) {
+            console.log("❌ JSON file not found");
+            process.exit(1);
+          }
 
-    for (const rollCode of rollCodes) {
-      const students = data[rollCode] || {};
-      const rollNos = Object.keys(students).sort((a, b) => Number(a) - Number(b));
+          let raw = fs.readFileSync(FILE, "utf8");
+          let data;
 
-      totalStudents += rollNos.length;
+          try {
+            data = JSON.parse(raw);
+          } catch (e) {
+            console.log("❌ JSON parse failed:", e.message);
+            process.exit(1);
+          }
 
-      for (const rollNo of rollNos) {
-        lastStudents.push({
-          rollCode,
-          rollNo,
-          student: students[rollNo]
-        });
+          const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
+          let totalStudents = 0;
+          const allStudents = [];
 
-        if (lastStudents.length > 2) {
-          lastStudents.shift();
-        }
-      }
-    }
+          for (const rc of rollCodes) {
+            const students = data[rc] || {};
+            const rollNos = Object.keys(students).sort((a, b) => Number(a) - Number(b));
 
-    console.log(`👨‍🎓 Total Students Saved: ${totalStudents}`);
+            totalStudents += rollNos.length;
 
-    console.log("\n===== LAST 2 STUDENTS =====");
-    if (lastStudents.length === 0) {
-      console.log("⚠️ No students found in file");
-    } else {
-      lastStudents.forEach((entry, i) => {
-        console.log(`\n[${i + 1}] Roll Code: ${entry.rollCode} | Roll No: ${entry.rollNo}`);
-        console.log(JSON.stringify(entry.student, null, 2));
-      });
-    }
+            for (const rn of rollNos) {
+              allStudents.push({
+                rollCode: rc,
+                rollNo: rn,
+                student: students[rn]
+              });
+            }
+          }
 
-    console.log("\n===== LAST 10 ROLL CODES SUMMARY =====");
-    const last10RollCodes = rollCodes.slice(-10);
-    for (const rc of last10RollCodes) {
-      const count = Object.keys(data[rc] || {}).length;
-      console.log(`${rc}: ${count} students`);
-    }
-  
+          console.log("===== JSON SUMMARY =====");
+          console.log("📚 Total Roll Codes:", rollCodes.length);
+          console.log("👨‍🎓 Total Students Saved:", totalStudents);
+
+          console.log("\n===== LAST 2 SAVED STUDENTS =====");
+
+          if (allStudents.length === 0) {
+            console.log("❌ No students found in JSON");
+          } else {
+            const last2 = allStudents.slice(-2);
+
+            last2.forEach((item, index) => {
+              console.log(`\n[${index + 1}] Roll Code: ${item.rollCode} | Roll No: ${item.rollNo}`);
+              console.log(JSON.stringify(item.student, null, 2));
+            });
+          }
+
+          console.log("\n===== LAST 10 ROLL CODES WITH STUDENT COUNTS =====");
+          const last10RollCodes = rollCodes.slice(-10);
+
+          for (const rc of last10RollCodes) {
+            const count = Object.keys(data[rc] || {}).length;
+            console.log(`${rc}: ${count} students`);
+          }
+          EOF
