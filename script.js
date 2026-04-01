@@ -16,8 +16,8 @@ const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
 // Recheck range (CHANGE THIS EACH RUN)
-const START_INDEX = 800;
-const END_INDEX = 1000;
+const START_INDEX = 1000;
+const END_INDEX = 2000;
 
 // SPEED
 const ROLL_CODE_PARALLEL = 8;      // how many roll codes at once
