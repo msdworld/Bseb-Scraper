@@ -1,100 +1,46 @@
-name: Check JSON Integrity
+name: Restore Old JSON File
 
 on:
   workflow_dispatch:
 
 jobs:
-  check-json:
+  restore:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
-          lfs: true
-          fetch-depth: 1
+          fetch-depth: 0
 
-      - name: Pull Git LFS files
+      - name: Backup current broken JSON
         run: |
-          git lfs install
-          git lfs pull
+          cp bseb-12th-full-result-2026.json bseb-12th-full-result-2026-broken-backup.json || true
 
-      - name: Show File Info
+      - name: Restore old JSON from good commit
         run: |
-          echo "===== ROOT FILES ====="
-          ls -lah
-          echo ""
-          echo "===== JSON FILE SIZE ====="
-          du -h bseb-12th-full-result-2026.json || echo "JSON file not found"
-          echo ""
-          echo "===== FIRST 5 LINES OF JSON FILE ====="
-          head -n 5 bseb-12th-full-result-2026.json || true
+          GOOD_COMMIT="2d906bf8264fcc8d33d881437d4c724bf6f86f69"
+          git checkout $GOOD_COMMIT -- bseb-12th-full-result-2026.json
 
-      - name: Check JSON Data
+      - name: Show restored file info
         run: |
-          node - <<'EOF'
-          const fs = require("fs");
+          echo "===== FILE SIZE ====="
+          du -h bseb-12th-full-result-2026.json || echo "File not found"
 
-          const FILE = "bseb-12th-full-result-2026.json";
+          echo "===== FILE START ====="
+          head -n 20 bseb-12th-full-result-2026.json || echo "Could not read file"
 
-          if (!fs.existsSync(FILE)) {
-            console.log("❌ JSON file not found");
-            process.exit(1);
-          }
+          echo "===== FILE END ====="
+          tail -n 20 bseb-12th-full-result-2026.json || echo "Could not read file"
 
-          let raw = fs.readFileSync(FILE, "utf8");
-          let data;
+      - name: Commit and Push Restored File
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          try {
-            data = JSON.parse(raw);
-          } catch (e) {
-            console.log("❌ JSON parse failed:", e.message);
-            console.log("\n===== FILE START PREVIEW =====");
-            console.log(raw.slice(0, 500));
-            process.exit(1);
-          }
-
-          const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-          let totalStudents = 0;
-          const allStudents = [];
-
-          for (const rc of rollCodes) {
-            const students = data[rc] || {};
-            const rollNos = Object.keys(students).sort((a, b) => Number(a) - Number(b));
-
-            totalStudents += rollNos.length;
-
-            for (const rn of rollNos) {
-              allStudents.push({
-                rollCode: rc,
-                rollNo: rn,
-                student: students[rn]
-              });
-            }
-          }
-
-          console.log("===== JSON SUMMARY =====");
-          console.log("📚 Total Roll Codes:", rollCodes.length);
-          console.log("👨‍🎓 Total Students Saved:", totalStudents);
-
-          console.log("\n===== LAST 2 SAVED STUDENTS =====");
-
-          if (allStudents.length === 0) {
-            console.log("❌ No students found in JSON");
-          } else {
-            const last2 = allStudents.slice(-2);
-
-            last2.forEach((item, index) => {
-              console.log(`\n[${index + 1}] Roll Code: ${item.rollCode} | Roll No: ${item.rollNo}`);
-              console.log(JSON.stringify(item.student, null, 2));
-            });
-          }
-
-          console.log("\n===== LAST 10 ROLL CODES WITH STUDENT COUNTS =====");
-          const last10RollCodes = rollCodes.slice(-10);
-
-          for (const rc of last10RollCodes) {
-            const count = Object.keys(data[rc] || {}).length;
-            console.log(`${rc}: ${count} students`);
-          }
-          EOF
+          git add bseb-12th-full-result-2026.json bseb-12th-full-result-2026-broken-backup.json
+          git commit -m "Restore correct BSEB full result JSON" || echo "No changes to commit"
+          git push
