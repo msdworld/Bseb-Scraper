@@ -6,34 +6,18 @@ const fs = require("fs");
 // CONFIG
 // ===============================
 const BASE_URL = "https://interbiharboard.com/";
-const FORM_URL = "https://interbiharboard.com/";
 const POST_URL = "https://interbiharboard.com/Result/GetResult";
 
-const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
-const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
-const PROGRESS_FILE = "progress.txt";
+// 🔥 CHANGE THIS ROLL CODE FOR TEST
+const TEST_ROLL_CODE = "16157";
 
-// Roll number range
+// Check only 1 to 30
 const ROLLNO_START = 26010001;
-const ROLLNO_END = 26010999;
+const ROLLNO_END = 26010030;
 
-// ===============================
-// SPEED / SAFETY BALANCE
-// ===============================
-const PARALLEL_ROLL_CODES = 3;     // 3 roll codes together
-const CONCURRENCY = 25;            // 25 requests at once per roll code
-const CHUNK_SIZE = 100;            // 100 roll numbers per session chunk
-const REQUEST_TIMEOUT = 12000;     // important: see explanation below
-const MAX_RETRIES = 3;
-
-// Save
-const SAVE_EVERY_VALID_RESULTS = 50;
-
-// ===============================
-// SPLIT RANGE (CHANGE EACH RUN)
-// ===============================
-const START_INDEX = 1144;
-const END_INDEX = 1150;
+// Speed
+const CONCURRENCY = 10;
+const REQUEST_TIMEOUT = 10000;
 
 // ===============================
 // AXIOS CLIENT
@@ -51,8 +35,7 @@ const client = axios.create({
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
     "Connection": "keep-alive",
-    "Origin": "https://interbiharboard.com",
-    "Referer": "https://interbiharboard.com/"
+    "Upgrade-Insecure-Requests": "1"
   }
 });
 
@@ -63,193 +46,66 @@ function clean(txt) {
   return (txt || "").replace(/\s+/g, " ").trim();
 }
 
-function getHidden($, selector) {
-  return clean($(selector).val() || "");
+function getHiddenByName($, name) {
+  return clean($(`input[name="${name}"]`).val() || "");
 }
 
 function generateCaptcha() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-function loadJSON(file, fallback = {}) {
-  if (!fs.existsSync(file)) return fallback;
-  try {
-    const raw = fs.readFileSync(file, "utf8").trim();
-    if (!raw || raw.startsWith("version https://git-lfs.github.com/spec")) {
-      console.log(`❌ ${file} is a Git LFS pointer, not actual JSON.`);
-      return fallback;
-    }
-    return JSON.parse(raw);
-  } catch (err) {
-    console.log(`❌ Failed to parse ${file}: ${err.message}`);
-    return fallback;
-  }
-}
-
-function writeProgress(text) {
-  fs.writeFileSync(PROGRESS_FILE, text, "utf8");
-}
-
-function countTotalStudentsSaved(fullResults) {
-  let total = 0;
-  for (const rollCode of Object.keys(fullResults)) {
-    total += Object.keys(fullResults[rollCode] || {}).length;
-  }
-  return total;
-}
-
-function detectAdditionalSection(text) {
-  const t = clean(text).toLowerCase();
-  if (t.includes("additional") || t.includes("अतिरिक्त")) {
-    return clean(text);
-  }
-  return null;
-}
-
 // ===============================
-// SAFE JSON SAVE (NO WIPE)
-// ===============================
-function formatStudent(student, indent = "    ") {
-  const lines = [];
-  lines.push("{");
-  lines.push(`${indent}"studentName": ${JSON.stringify(student.studentName)},`);
-  lines.push(`${indent}"fatherName": ${JSON.stringify(student.fatherName)},`);
-  lines.push(`${indent}"regNumber": ${JSON.stringify(student.regNumber)},`);
-  lines.push(`${indent}"BSEBUniqueId": ${JSON.stringify(student.BSEBUniqueId)},`);
-  lines.push(`${indent}"schoolName": ${JSON.stringify(student.schoolName)},`);
-  lines.push(`${indent}"rollCode": ${JSON.stringify(student.rollCode)},`);
-  lines.push(`${indent}"rollNo": ${JSON.stringify(student.rollNo)},`);
-  lines.push(`${indent}"stream": ${JSON.stringify(student.stream)},`);
-  lines.push(`${indent}"totalMarks": ${JSON.stringify(student.totalMarks)},`);
-  lines.push(`${indent}"Division": ${JSON.stringify(student.Division)},`);
-  lines.push(`${indent}"subjects": [`);
-
-  const subjectLines = student.subjects.map((sub) => {
-    const ordered = {};
-    ordered.subject = sub.subject;
-    ordered.FMarks = sub.FMarks;
-    ordered.PMarks = sub.PMarks;
-    ordered.theory = sub.theory;
-    if (sub.practical !== undefined) ordered.practical = sub.practical;
-    if (sub.regulationTheory !== undefined) ordered.regulationTheory = sub.regulationTheory;
-    if (sub.regulationPractical !== undefined) ordered.regulationPractical = sub.regulationPractical;
-    ordered.subTotal = sub.subTotal;
-    if (sub.extra !== undefined) ordered.extra = sub.extra;
-    return `${indent}  ${JSON.stringify(ordered)}`;
-  });
-
-  lines.push(subjectLines.join(",\n"));
-  lines.push(`${indent}]`);
-  lines.push("}");
-  return lines.join("\n");
-}
-
-function saveCustomJSON(file, data) {
-  const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-  const lines = [];
-  lines.push("{");
-
-  rollCodes.forEach((rollCode, idx) => {
-    const students = data[rollCode] || {};
-    const rollNoKeys = Object.keys(students).sort((a, b) => Number(a) - Number(b));
-
-    lines.push(`  ${JSON.stringify(rollCode)}: {`);
-
-    rollNoKeys.forEach((rollNo, i) => {
-      const student = students[rollNo];
-      const formatted = formatStudent(student, "      ")
-        .split("\n")
-        .map((line, index) => (index === 0 ? `    ${JSON.stringify(rollNo)}: ${line}` : `    ${line}`))
-        .join("\n");
-
-      lines.push(formatted + (i < rollNoKeys.length - 1 ? "," : ""));
-    });
-
-    lines.push(`  }${idx < rollCodes.length - 1 ? "," : ""}`);
-  });
-
-  lines.push("}");
-  fs.writeFileSync(file, lines.join("\n"), "utf8");
-}
-
-// ===============================
-// RESULT PARSING
+// SUBJECT PARSER
 // ===============================
 function parseSubjects($) {
   const subjects = [];
-  let marksTableFound = false;
-  let currentAdditionalSection = null;
 
   $("table").each((_, table) => {
-    if (marksTableFound) return;
-
     const rows = $(table).find("tr");
     if (rows.length < 3) return;
 
-    const row1 = [];
-    const row2 = [];
-
-    $(rows[0]).find("td,th").each((_, cell) => row1.push(clean($(cell).text())));
-    $(rows[1]).find("td,th").each((_, cell) => row2.push(clean($(cell).text())));
-
-    const row1Text = row1.join(" ").toLowerCase();
-    const row2Text = row2.join(" ").toLowerCase();
+    const headerText = clean($(table).text()).toLowerCase();
 
     const isMarksTable =
-      row1Text.includes("subject") &&
-      row1Text.includes("full marks") &&
-      row1Text.includes("pass marks") &&
-      row1Text.includes("theory") &&
-      row1Text.includes("practical") &&
-      row1Text.includes("subject total") &&
-      row2Text.includes("th.") &&
-      row2Text.includes("pr.");
+      headerText.includes("subject") &&
+      headerText.includes("full marks") &&
+      headerText.includes("pass marks") &&
+      headerText.includes("theory");
 
     if (!isMarksTable) return;
-    marksTableFound = true;
 
-    for (let i = 2; i < rows.length; i++) {
-      const row = rows[i];
+    rows.each((i, row) => {
+      if (i < 2) return;
+
       const cells = [];
-      $(row).find("td,th").each((_, cell) => cells.push(clean($(cell).text())));
-      if (!cells.length) continue;
+      $(row).find("td,th").each((_, cell) => {
+        cells.push(clean($(cell).text()));
+      });
 
-      if (cells.length === 1) {
-        const extraLabel = detectAdditionalSection(cells[0]);
-        currentAdditionalSection = extraLabel;
-        continue;
-      }
-
-      if (cells.length !== 8) continue;
+      if (cells.length < 5) return;
 
       const subjectName = clean(cells[0]);
-      if (!subjectName) continue;
+      if (!subjectName) return;
 
-      const obj = {
+      subjects.push({
         subject: subjectName,
         FMarks: clean(cells[1] || ""),
         PMarks: clean(cells[2] || ""),
         theory: clean(cells[3] || ""),
+        practical: clean(cells[4] || ""),
+        regulationTheory: clean(cells[5] || ""),
+        regulationPractical: clean(cells[6] || ""),
         subTotal: clean(cells[7] || "")
-      };
-
-      const practical = clean(cells[4] || "");
-      const regulationTheory = clean(cells[5] || "");
-      const regulationPractical = clean(cells[6] || "");
-
-      if (practical !== "") obj.practical = practical;
-      if (regulationTheory !== "") obj.regulationTheory = regulationTheory;
-      if (regulationPractical !== "") obj.regulationPractical = regulationPractical;
-
-      if (currentAdditionalSection) obj.extra = currentAdditionalSection;
-
-      subjects.push(obj);
-    }
+      });
+    });
   });
 
   return subjects;
 }
 
+// ===============================
+// KEY VALUE EXTRACTION
+// ===============================
 function extractKeyValues($) {
   const data = {};
 
@@ -271,46 +127,75 @@ function extractFullResult(html) {
   const subjects = parseSubjects($);
 
   return {
-    studentName: kv["Student's Name"] || null,
-    fatherName: kv["Father's Name"] || null,
-    regNumber: kv["Registration Number"] || null,
-    BSEBUniqueId: kv["BSEB Unique Id"] || null,
-    schoolName: kv["School/College Name"] || null,
-    rollCode: kv["Roll Code"] || null,
-    rollNo: kv["Roll Number"] || null,
-    stream: kv["Faculty"] || null,
-    totalMarks: kv["Aggregate Marks"] || null,
-    Division: kv["Result/Division"] || null,
+    studentName:
+      kv["Student's Name"] ||
+      kv["Student Name"] ||
+      null,
+
+    fatherName:
+      kv["Father's Name"] ||
+      kv["Father Name"] ||
+      null,
+
+    regNumber:
+      kv["Registration Number"] ||
+      null,
+
+    BSEBUniqueId:
+      kv["BSEB Unique Id"] ||
+      kv["BSEB Unique ID"] ||
+      null,
+
+    schoolName:
+      kv["School/College Name"] ||
+      kv["School Name"] ||
+      kv["College Name"] ||
+      null,
+
+    rollCode:
+      kv["Roll Code"] ||
+      null,
+
+    rollNo:
+      kv["Roll Number"] ||
+      kv["Roll No"] ||
+      null,
+
+    stream:
+      kv["Faculty"] ||
+      kv["Stream"] ||
+      null,
+
+    totalMarks:
+      kv["Aggregate Marks"] ||
+      kv["Total Marks"] ||
+      null,
+
+    Division:
+      kv["Result/Division"] ||
+      kv["Division"] ||
+      kv["Result"] ||
+      null,
+
     subjects
   };
 }
 
-function isFormPage(html) {
-  const text = String(html || "").toLowerCase();
-  return (
-    text.includes("bseb result 2026") &&
-    text.includes("enter roll code") &&
-    text.includes("enter roll number") &&
-    text.includes("captcha")
-  );
-}
-
 // ===============================
-// SESSION FETCH
+// GET SESSION
 // ===============================
 async function getSessionData() {
-  const res = await client.get(FORM_URL);
+  const res = await client.get(BASE_URL);
   const html = res.data;
   const $ = cheerio.load(html);
 
   const rawCookies = res.headers["set-cookie"] || [];
   const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
 
-  const token =
-    getHidden($, 'input[name="__RequestVerificationToken"]') ||
-    getHidden($, "#__RequestVerificationToken");
+  const token = getHiddenByName($, "__RequestVerificationToken");
 
   if (!token) {
+    fs.writeFileSync("debug-default.html", html);
     throw new Error("Could not fetch __RequestVerificationToken");
   }
 
@@ -321,189 +206,119 @@ async function getSessionData() {
 }
 
 // ===============================
-// FETCH ONE RESULT (RETRY SAFE)
+// FETCH ONE RESULT
 // ===============================
 async function fetchStudentResult(rollCode, rollNo, sessionData) {
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const payload = new URLSearchParams();
-      payload.append("rollcode", String(rollCode));
-      payload.append("rollno", String(rollNo));
-      payload.append("captcha", generateCaptcha());
-      payload.append("__RequestVerificationToken", sessionData.token);
+  try {
+    const payload = new URLSearchParams();
+    payload.append("rollcode", String(rollCode));
+    payload.append("rollno", String(rollNo));
+    payload.append("captcha", generateCaptcha());
+    payload.append("__RequestVerificationToken", sessionData.token);
 
-      const res = await client.post(POST_URL, payload.toString(), {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Cookie": sessionData.cookieHeader,
-          "Referer": FORM_URL,
-          "Origin": "https://interbiharboard.com"
-        }
-      });
-
-      const html = String(res.data || "");
-
-      // If site returned form page again, retry once with fresh signal
-      if (isFormPage(html)) {
-        if (attempt < MAX_RETRIES) continue;
-        return { valid: false, reason: "form_page" };
+    const res = await client.post(POST_URL, payload.toString(), {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Cookie": sessionData.cookieHeader,
+        "Referer": BASE_URL,
+        "Origin": "https://interbiharboard.com"
       }
+    });
 
-      const result = extractFullResult(html);
+    const finalUrl = res.request?.res?.responseUrl || "";
+    const html = String(res.data || "");
+    const htmlLower = html.toLowerCase();
 
-      if (
-        result.studentName &&
-        result.rollCode === String(rollCode) &&
-        result.rollNo === String(rollNo)
-      ) {
-        return { valid: true, data: result };
-      }
-
-      return { valid: false, reason: "invalid" };
-    } catch (err) {
-      if (attempt === MAX_RETRIES) {
-        return { valid: false, reason: "error" };
-      }
-    }
-  }
-
-  return { valid: false, reason: "unknown" };
-}
-
-// ===============================
-// LOAD ROLL CODES
-// ===============================
-function loadValidRollCodes() {
-  const raw = loadJSON(VALID_ROLL_CODE_FILE, {});
-  return Object.keys(raw)
-    .filter(code => /^\d+$/.test(code))
-    .sort((a, b) => Number(a) - Number(b));
-}
-
-// ===============================
-// PROCESS ONE ROLL CODE
-// ===============================
-async function processRollCode(rollCode, fullResults, stats) {
-  if (!fullResults[rollCode]) fullResults[rollCode] = {};
-
-  const alreadySavedSet = new Set(Object.keys(fullResults[rollCode]));
-  const alreadySavedCount = alreadySavedSet.size;
-
-  console.log(`▶️ Rechecking Roll Code ${rollCode} (already saved: ${alreadySavedCount})`);
-
-  let newSaved = 0;
-  let skippedExisting = 0;
-  let checkedMissing = 0;
-
-  for (let chunkStart = ROLLNO_START; chunkStart <= ROLLNO_END; chunkStart += CHUNK_SIZE) {
-    const chunkEnd = Math.min(chunkStart + CHUNK_SIZE - 1, ROLLNO_END);
-
-    let sessionData;
-    try {
-      sessionData = await getSessionData();
-    } catch (err) {
-      console.log(`⚠️ Session fetch failed for ${rollCode} (${chunkStart}-${chunkEnd}), retrying next chunk`);
-      continue;
+    // Save one sample invalid/unknown response for debugging
+    if (rollNo === ROLLNO_START) {
+      fs.writeFileSync("debug-sample-response.html", html);
     }
 
-    const rollNosToCheck = [];
-    for (let rn = chunkStart; rn <= chunkEnd; rn++) {
-      if (alreadySavedSet.has(String(rn))) {
-        skippedExisting++;
-      } else {
-        rollNosToCheck.push(rn);
-      }
+    // If still returned form page, not a valid result
+    if (
+      finalUrl === "https://interbiharboard.com/" ||
+      htmlLower.includes("enter roll code") ||
+      htmlLower.includes("enter roll number") ||
+      htmlLower.includes("please enter correct captcha")
+    ) {
+      return { valid: false };
     }
 
-    for (let i = 0; i < rollNosToCheck.length; i += CONCURRENCY) {
-      const batch = rollNosToCheck.slice(i, i + CONCURRENCY);
+    const result = extractFullResult(html);
 
-      const results = await Promise.all(
-        batch.map(rn => fetchStudentResult(rollCode, rn, sessionData))
-      );
-
-      for (let j = 0; j < batch.length; j++) {
-        const rn = batch[j];
-        const result = results[j];
-        checkedMissing++;
-
-        if (result.valid && result.data) {
-          fullResults[rollCode][rn] = result.data;
-          alreadySavedSet.add(String(rn));
-          newSaved++;
-          stats.totalStudentsSaved++;
-          stats.unsavedValidCount++;
-
-          console.log(`➕ Found ${rollCode}-${rn} | New saved: ${newSaved}`);
-
-          if (stats.unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
-            saveCustomJSON(OUTPUT_FILE, fullResults);
-            console.log(`💾 Progress Saved | Total Saved: ${stats.totalStudentsSaved}`);
-            writeProgress(
-              `Last roll code: ${rollCode}\nLast checked roll no chunk: ${chunkStart}-${chunkEnd}\nTotal saved: ${stats.totalStudentsSaved}\n`
-            );
-            stats.unsavedValidCount = 0;
-          }
-        }
-      }
+    if (
+      result.studentName &&
+      String(result.rollCode) === String(rollCode) &&
+      String(result.rollNo) === String(rollNo)
+    ) {
+      return { valid: true, data: result };
     }
-  }
 
-  if (newSaved > 0) {
-    saveCustomJSON(OUTPUT_FILE, fullResults);
-    console.log(`✅ Roll Code ${rollCode} finished | New saved: ${newSaved} | Already had: ${alreadySavedCount} | Skipped existing: ${skippedExisting}`);
-    stats.unsavedValidCount = 0;
-  } else {
-    console.log(`⚠️ Roll Code ${rollCode} finished | No new student saved | Already had: ${alreadySavedCount} | Skipped existing: ${skippedExisting}`);
+    return { valid: false };
+  } catch (err) {
+    return {
+      valid: false,
+      error: err.message
+    };
   }
 }
 
 // ===============================
-// MAIN
+// MAIN TEST
 // ===============================
 (async () => {
-  const allValidRollCodes = loadValidRollCodes();
+  console.log(`🧪 TEST STARTED`);
+  console.log(`🎯 Roll Code: ${TEST_ROLL_CODE}`);
+  console.log(`🔎 Roll Range: ${ROLLNO_START} to ${ROLLNO_END}`);
+  console.log(`⚡ Concurrency: ${CONCURRENCY}`);
+  console.log("");
 
-  if (!allValidRollCodes.length) {
-    console.log(`❌ No valid roll codes found in ${VALID_ROLL_CODE_FILE}`);
-    return;
+  const sessionData = await getSessionData();
+  console.log(`✅ Session fetched`);
+  console.log("");
+
+  const allRollNos = [];
+  for (let rn = ROLLNO_START; rn <= ROLLNO_END; rn++) {
+    allRollNos.push(rn);
   }
 
-  const selectedRollCodes = allValidRollCodes.slice(START_INDEX, END_INDEX + 1);
+  const foundStudents = [];
 
-  if (!selectedRollCodes.length) {
-    console.log(`❌ No roll codes found in selected split range ${START_INDEX}-${END_INDEX}`);
-    return;
-  }
+  for (let i = 0; i < allRollNos.length; i += CONCURRENCY) {
+    const chunk = allRollNos.slice(i, i + CONCURRENCY);
 
-  const fullResults = loadJSON(OUTPUT_FILE, {});
-  const stats = {
-    totalStudentsSaved: countTotalStudentsSaved(fullResults),
-    unsavedValidCount: 0
-  };
+    console.log(`🚀 Checking: ${chunk[0]} to ${chunk[chunk.length - 1]}`);
 
-  console.log(`🚀 FULL RECHECK STARTED`);
-  console.log(`📚 Total valid roll codes available: ${allValidRollCodes.length}`);
-  console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
-  console.log(`📦 Roll codes in this run: ${selectedRollCodes.length}`);
-  console.log(`📦 Already saved students in JSON: ${stats.totalStudentsSaved}`);
-  console.log(`⚡ Parallel roll codes: ${PARALLEL_ROLL_CODES}`);
-  console.log(`⚡ Concurrency per roll code: ${CONCURRENCY}`);
-
-  for (let i = 0; i < selectedRollCodes.length; i += PARALLEL_ROLL_CODES) {
-    const group = selectedRollCodes.slice(i, i + PARALLEL_ROLL_CODES);
-    console.log(`🚀 Starting roll code group: ${group.join(", ")}`);
-
-    await Promise.all(
-      group.map(rollCode => processRollCode(rollCode, fullResults, stats))
+    const results = await Promise.all(
+      chunk.map(rn => fetchStudentResult(TEST_ROLL_CODE, rn, sessionData))
     );
+
+    for (let j = 0; j < chunk.length; j++) {
+      const rn = chunk[j];
+      const result = results[j];
+
+      if (result.valid) {
+        foundStudents.push(result.data);
+
+        console.log(`✅ VALID FOUND`);
+        console.log(`   Roll No: ${rn}`);
+        console.log(`   Name   : ${result.data.studentName}`);
+        console.log(`   Father : ${result.data.fatherName}`);
+        console.log(`   School : ${result.data.schoolName}`);
+        console.log(`--------------------------------------`);
+      } else {
+        console.log(`❌ Invalid: ${rn}`);
+      }
+    }
+
+    console.log("");
   }
 
-  saveCustomJSON(OUTPUT_FILE, fullResults);
+  fs.writeFileSync("test-found-students.json", JSON.stringify(foundStudents, null, 2));
 
-  writeProgress(
-    `Completed split: ${START_INDEX}-${END_INDEX}\nTotal saved: ${stats.totalStudentsSaved}\n`
-  );
-
-  console.log(`🎉 FULL RECHECK COMPLETED | Range ${START_INDEX}-${END_INDEX} | Total Saved: ${stats.totalStudentsSaved}`);
+  console.log(`======================================`);
+  console.log(`🎉 TEST COMPLETED`);
+  console.log(`📦 Total Valid Found: ${foundStudents.length}`);
+  console.log(`💾 Saved file: test-found-students.json`);
+  console.log(`======================================`);
 })();
