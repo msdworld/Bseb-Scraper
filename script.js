@@ -5,7 +5,6 @@ const fs = require("fs");
 // ===============================
 // CONFIG
 // ===============================
-const BASE_URL = "https://interbiharboard.com/";
 const GET_FORM_URL = "https://interbiharboard.com/";
 const POST_URL = "https://interbiharboard.com/Result/GetResult";
 
@@ -17,18 +16,18 @@ const PROGRESS_FILE = "progress.txt";
 const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
-// Speed / Stability
-const PARALLEL_ROLL_CODES = 4;     // increase later if stable
-const CONCURRENCY = 40;            // per roll code
-const BATCH_SIZE = 120;            // roll nos per session batch
-const REQUEST_TIMEOUT = 12000;
-const MAX_RETRIES = 3;
+// SAFE RECHECK SPEED
+const PARALLEL_ROLL_CODES = 3;   // safer
+const CONCURRENCY = 15;          // IMPORTANT: lower = fewer misses
+const BATCH_SIZE = 50;           // fresh token often
+const REQUEST_TIMEOUT = 15000;
+const MAX_RETRIES = 4;
 
 // Save
-const SAVE_EVERY_VALID_RESULTS = 100;
+const SAVE_EVERY_VALID_RESULTS = 50;
 
 // ===============================
-// SPLIT RANGE (CHANGE EACH RUN)
+// SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
 const START_INDEX = 1144;
 const END_INDEX = 1150;
@@ -80,10 +79,8 @@ function loadJSON(file, fallback = {}) {
 
     if (!raw) return fallback;
 
-    // If Git LFS pointer file accidentally loaded
     if (raw.startsWith("version https://git-lfs.github.com/spec/v1")) {
-      console.log(`❌ ${file} is currently a Git LFS pointer file, not real JSON.`);
-      console.log(`⚠️ Download/restore actual JSON before running scraper.`);
+      console.log(`❌ ${file} is Git LFS pointer file, not actual JSON.`);
       return fallback;
     }
 
@@ -346,8 +343,8 @@ async function getSessionData(retries = 3) {
 // ===============================
 // FETCH ONE RESULT
 // ===============================
-async function fetchStudentResult(rollCode, rollNo, sessionData, retries = MAX_RETRIES) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
+async function fetchStudentResult(rollCode, rollNo, sessionData) {
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const payload = new URLSearchParams();
       payload.append("rollcode", String(rollCode));
@@ -365,21 +362,14 @@ async function fetchStudentResult(rollCode, rollNo, sessionData, retries = MAX_R
       });
 
       const html = String(res.data || "");
-      const lower = html.toLowerCase();
 
-      // If site sent form page again, session/token likely failed
+      // If form page returned again, retry with SAME request first
       if (looksLikeFormPage(html)) {
-        if (attempt === retries) return { valid: false, reason: "form_returned" };
-        await sleep(400 * attempt);
-        continue;
-      }
-
-      if (
-        lower.includes("invalid") ||
-        lower.includes("no record") ||
-        lower.includes("not found")
-      ) {
-        return { valid: false, reason: "invalid" };
+        if (attempt < MAX_RETRIES) {
+          await sleep(500 * attempt);
+          continue;
+        }
+        return { valid: false, reason: "form_returned" };
       }
 
       const result = extractFullResult(html);
@@ -388,17 +378,19 @@ async function fetchStudentResult(rollCode, rollNo, sessionData, retries = MAX_R
         return { valid: true, data: result };
       }
 
-      // If page exists but parsing failed, retry
-      if (attempt === retries) {
-        return { valid: false, reason: "parse_fail" };
+      // If parser failed or weird response, retry
+      if (attempt < MAX_RETRIES) {
+        await sleep(500 * attempt);
+        continue;
       }
 
-      await sleep(300 * attempt);
+      return { valid: false, reason: "parse_fail" };
     } catch (err) {
-      if (attempt === retries) {
-        return { valid: false, reason: "request_fail" };
+      if (attempt < MAX_RETRIES) {
+        await sleep(800 * attempt);
+        continue;
       }
-      await sleep(500 * attempt);
+      return { valid: false, reason: "request_fail" };
     }
   }
 
@@ -428,7 +420,6 @@ async function processRollCode(rollCode, fullResults, counters) {
 
   let newSaved = 0;
   let skippedExisting = 0;
-  let checkedNew = 0;
 
   for (let start = ROLLNO_START; start <= ROLLNO_END; start += BATCH_SIZE) {
     const end = Math.min(start + BATCH_SIZE - 1, ROLLNO_END);
@@ -460,7 +451,6 @@ async function processRollCode(rollCode, fullResults, counters) {
       for (let j = 0; j < chunk.length; j++) {
         const rn = chunk[j];
         const result = results[j];
-        checkedNew++;
 
         if (result.valid && !fullResults[rollCode][rn]) {
           fullResults[rollCode][rn] = result.data;
@@ -526,7 +516,6 @@ async function processRollCode(rollCode, fullResults, counters) {
 
   for (let i = 0; i < selectedRollCodes.length; i += PARALLEL_ROLL_CODES) {
     const group = selectedRollCodes.slice(i, i + PARALLEL_ROLL_CODES);
-
     console.log(`\n🚀 Starting roll code group: ${group.join(", ")}`);
 
     await Promise.all(
