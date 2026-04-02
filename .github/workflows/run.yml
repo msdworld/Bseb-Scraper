@@ -1,12 +1,81 @@
-- name: Commit and Push Results
+name: BSEB Full Audit Recheck
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run Audit Script
+        run: node script.js
+
+      - name: Show Saved Files
+        if: always()
+        run: |
+          echo "===== ROOT FILES ====="
+          ls -lah
+
+          echo ""
+          echo "===== JSON FILE SIZE ====="
+          du -h bseb-12th-full-result-2026.json || echo "JSON file not found"
+
+          echo ""
+          echo "===== PROGRESS FILE ====="
+          cat progress.txt || echo "Progress file not found"
+
+          echo ""
+          echo "===== JSON START ====="
+          head -n 30 bseb-12th-full-result-2026.json || echo "JSON file not found"
+
+          echo ""
+          echo "===== JSON END ====="
+          tail -n 30 bseb-12th-full-result-2026.json || echo "JSON file not found"
+
+      - name: Validate JSON Before Commit
+        if: always()
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('bseb-12th-full-result-2026.json','utf8')); console.log('✅ JSON VALID')"
+
+      - name: Commit and Push Results
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add bseb-12th-full-result-2026.json progress.txt script.js
-          git commit -m "Audit update BSEB full result data" || echo "No changes to commit"
+          git add bseb-12th-full-result-2026.json progress.txt script.js package.json package-lock.json
+
+          git diff --cached --quiet && echo "No changes to commit" || git commit -m "Audit update BSEB full result data"
 
           git fetch origin main
           git pull --rebase origin main || true
           git push origin main
+
+      - name: Upload Result Files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseb-audit-result-data
+          path: |
+            bseb-12th-full-result-2026.json
+            progress.txt
