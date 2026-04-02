@@ -5,7 +5,7 @@ const cheerio = require("cheerio");
 // CONFIG
 // ===============================
 const BASE_URL = "https://interbiharboard.com/";
-const POST_URL = "https://interbiharboard.com/Result.aspx";
+const POST_URL = "https://interbiharboard.com/Result/GetResult";
 
 const TEST_ROLL_CODE = "16157";
 const ROLLNO_START = 26010001;
