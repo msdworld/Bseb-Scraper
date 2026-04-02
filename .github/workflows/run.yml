@@ -1,23 +1,12 @@
-name: BSEB Test Single Roll Code
+- name: Commit and Push Results
+        if: always()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com]"
 
-on:
-  workflow_dispatch:
+          git add bseb-12th-full-result-2026.json progress.txt script.js
+          git commit -m "Audit update BSEB full result data" || echo "No changes to commit"
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Run Test Script
-        run: node script.js
+          git fetch origin main
+          git pull --rebase origin main || true
+          git push origin main
