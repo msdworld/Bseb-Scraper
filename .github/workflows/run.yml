@@ -1,10 +1,10 @@
-name: BSEB Single Roll Test
+name: BSEB Test Single Roll Code
 
 on:
   workflow_dispatch:
 
 jobs:
-  scrape:
+  test:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,11 +19,5 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Run Script
+      - name: Run Test Script
         run: node script.js
-
-      - name: Show Files
-        if: always()
-        run: |
-          echo "===== FILE LIST ====="
-          ls -la
