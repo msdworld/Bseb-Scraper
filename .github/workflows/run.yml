@@ -1,14 +1,11 @@
-name: BSEB Single Roll Code Test
+name: BSEB Single Roll Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  test:
+  scrape:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout Repo
@@ -20,25 +17,13 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: npm install axios cheerio
+        run: npm install
 
-      - name: Run Test Script
+      - name: Run Script
         run: node script.js
 
       - name: Show Files
         if: always()
         run: |
-          echo "===== FILES ====="
+          echo "===== FILE LIST ====="
           ls -la
-          echo "===== FOUND STUDENTS ====="
-          cat test-found-students.json || echo "No file found"
-
-      - name: Upload Debug Files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bseb-single-roll-test
-          path: |
-            test-found-students.json
-            debug-default.html
-            debug-sample-response.html
