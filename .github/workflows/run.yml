@@ -1,10 +1,10 @@
-name: BSEB Recheck Full Result
+name: BSEB Single Roll Code Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  scrape:
+  test:
     runs-on: ubuntu-latest
 
     permissions:
@@ -13,10 +13,6 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-          fetch-depth: 0
-          lfs: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -24,31 +20,25 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: npm install
+        run: npm install axios cheerio
 
-      - name: Run Script
+      - name: Run Test Script
         run: node script.js
 
-      - name: Show Saved Files
+      - name: Show Files
         if: always()
         run: |
-          echo "===== ROOT FILES ====="
-          ls -lah
-          echo ""
-          echo "===== JSON FILE SIZE ====="
-          du -h bseb-12th-full-result-2026.json || echo "JSON not found"
-          echo ""
-          echo "===== PROGRESS ====="
-          cat progress.txt || echo "Progress file not found"
+          echo "===== FILES ====="
+          ls -la
+          echo "===== FOUND STUDENTS ====="
+          cat test-found-students.json || echo "No file found"
 
-      - name: Commit and Push Results
+      - name: Upload Debug Files
         if: always()
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add bseb-12th-full-result-2026.json progress.txt bseb-12th-full-result-2026.backup.json
-          git commit -m "Update BSEB recheck data" || echo "No changes to commit"
-
-          git pull --rebase origin main || true
-          git push
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseb-single-roll-test
+          path: |
+            test-found-students.json
+            debug-default.html
+            debug-sample-response.html
