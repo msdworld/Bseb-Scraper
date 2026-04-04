@@ -1,7 +1,6 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
-const zlib = require("zlib");
 
 // ===============================
 // CONFIG
@@ -12,24 +11,25 @@ const SHOW_RESULT_URL = "https://interbiharboard.com/Result/ShowResult";
 
 const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
-const GZ_FILE = "bseb-12th-full-result-2026.json.gz";
-const PROGRESS_FILE = "progress.txt";
 
 // Roll number range per roll code
 const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
+// SPEED
+const ROLLCODE_PARALLEL = 50;
+const CONCURRENCY = 1000;
+const BATCH_SIZE = 120;
+const REQUEST_TIMEOUT = 8000;
+
+// SAVE
+const SAVE_EVERY_VALID_RESULTS = 100;
+
 // ===============================
-// FINAL RECHECK SETTINGS
+// SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
 const START_INDEX = 6000;
 const END_INDEX = 6200;
-
-const ROLLCODE_PARALLEL = 200;
-const CONCURRENCY = 1000;
-const BATCH_SIZE = 100;
-const REQUEST_TIMEOUT = 8000;
-const SAVE_EVERY_VALID_RESULTS = 100;
 
 // ===============================
 // AXIOS CLIENT
@@ -66,13 +66,10 @@ function loadJSON(file, fallback = {}) {
   if (!fs.existsSync(file)) return fallback;
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
+  } catch (e) {
+    console.log(`❌ Failed to parse ${file}: ${e.message}`);
     return fallback;
   }
-}
-
-function saveProgress(text) {
-  fs.writeFileSync(PROGRESS_FILE, text, "utf8");
 }
 
 function detectAdditionalSection(text) {
@@ -112,33 +109,6 @@ function mergeCookies(oldCookieHeader, newSetCookies = []) {
   return Object.entries(jar)
     .map(([k, v]) => `${k}=${v}`)
     .join("; ");
-}
-
-function loadMainData() {
-  if (fs.existsSync(OUTPUT_FILE)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(OUTPUT_FILE, "utf8"));
-      console.log("✅ Loaded fallback JSON data");
-      return data;
-    } catch {
-      console.log("⚠️ JSON exists but invalid");
-    }
-  }
-
-  if (fs.existsSync(GZ_FILE)) {
-    try {
-      const gzBuffer = fs.readFileSync(GZ_FILE);
-      const jsonBuffer = zlib.gunzipSync(gzBuffer);
-      const data = JSON.parse(jsonBuffer.toString("utf8"));
-      console.log("✅ Loaded GZ data");
-      return data;
-    } catch (e) {
-      console.log("⚠️ GZ exists but is invalid");
-    }
-  }
-
-  console.log("⚠️ No valid previous data found. Starting empty.");
-  return {};
 }
 
 // ===============================
@@ -237,6 +207,7 @@ function parseSubjects($) {
     $(rows[1]).find("td,th").each((_, cell) => row2.push(clean($(cell).text())));
 
     const row1Text = row1.join(" ").toLowerCase();
+
     const isMarksTable =
       row1Text.includes("subject") &&
       row1Text.includes("full marks") &&
@@ -463,7 +434,9 @@ const saveState = {
 async function processRollCode(rollCode) {
   if (!saveState.fullResults[rollCode]) saveState.fullResults[rollCode] = {};
 
-  const alreadySavedForRollCode = Object.keys(saveState.fullResults[rollCode]).length;
+  const existingRollNos = new Set(Object.keys(saveState.fullResults[rollCode] || {}));
+  const alreadySavedForRollCode = existingRollNos.size;
+
   let savedInThisRollCode = 0;
   let skippedExisting = 0;
 
@@ -476,6 +449,10 @@ async function processRollCode(rollCode) {
     const batchRollNos = [];
 
     for (let rn = currentRollNo; rn <= batchEnd; rn++) {
+      if (existingRollNos.has(String(rn))) {
+        skippedExisting++;
+        continue;
+      }
       batchRollNos.push(rn);
     }
 
@@ -496,8 +473,6 @@ async function processRollCode(rollCode) {
             saveState.unsavedValidCount++;
             saveState.totalStudentsSaved++;
             savedInThisRollCode++;
-          } else {
-            skippedExisting++;
           }
         }
       }
@@ -537,7 +512,7 @@ async function processRollCode(rollCode) {
     return;
   }
 
-  saveState.fullResults = loadMainData();
+  saveState.fullResults = loadJSON(OUTPUT_FILE, {});
   saveState.totalStudentsSaved = countTotalStudentsSaved(saveState.fullResults);
   saveState.unsavedValidCount = 0;
 
@@ -552,23 +527,18 @@ async function processRollCode(rollCode) {
   for (let i = 0; i < selectedRollCodes.length; i += ROLLCODE_PARALLEL) {
     const rollCodeChunk = selectedRollCodes.slice(i, i + ROLLCODE_PARALLEL);
 
-    console.log(`\n🚀 Roll code group: ${rollCodeChunk.join(", ")}`);
+    console.log(`🚀 Roll code group: ${rollCodeChunk.join(", ")}`);
 
     await Promise.all(
       rollCodeChunk.map(rollCode => processRollCode(rollCode))
     );
 
     saveCustomJSON(OUTPUT_FILE, saveState.fullResults);
-
-    saveProgress(
-      `Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length}\nTotal Saved: ${saveState.totalStudentsSaved}\nLast Run Range: ${START_INDEX}-${END_INDEX}\n`
-    );
-
     console.log(`💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | Total Saved: ${saveState.totalStudentsSaved}`);
   }
 
   saveCustomJSON(OUTPUT_FILE, saveState.fullResults);
 
-  console.log(`\n🎉 FULL RECHECK COMPLETED`);
+  console.log(`🎉 FULL RECHECK COMPLETED`);
   console.log(`📦 Final Total Saved: ${saveState.totalStudentsSaved}`);
 })();
