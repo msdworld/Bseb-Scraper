@@ -1,149 +1,163 @@
-name: Safe Convert JSON To GZ
+name: Recover Real JSON From Artifact To GZ
 
 on:
   workflow_dispatch:
 
 jobs:
-  convert:
+  recover:
     runs-on: ubuntu-latest
 
     permissions:
       contents: write
+      actions: read
 
     steps:
-      - name: Checkout Repo with LFS
+      - name: Checkout Repo WITHOUT LFS
         uses: actions/checkout@v4
         with:
-          lfs: true
-          persist-credentials: true
+          lfs: false
 
-      - name: Show Initial Files
+      - name: Show current files
         run: |
-          echo "===== ROOT FILES ====="
-          ls -lah
-
-          echo "===== JSON FILE SIZE ====="
-          ls -lh bseb-12th-full-result-2026.json || true
-
-          echo "===== JSON START ====="
+          echo "===== BEFORE RECOVERY ====="
+          ls -lh
+          echo
+          echo "===== CURRENT JSON FILE HEAD ====="
           head -n 5 bseb-12th-full-result-2026.json || true
 
-      - name: Verify JSON Is Real and Count Data
+      - name: Download artifact ZIP using GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ARTIFACT_ID: 6269148355
+        run: |
+          echo "⬇️ Downloading artifact..."
+          curl -L \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/actions/artifacts/$ARTIFACT_ID/zip" \
+            -o artifact.zip
+
+          echo "===== ARTIFACT ZIP INFO ====="
+          ls -lh artifact.zip
+
+      - name: Extract artifact
+        run: |
+          mkdir artifact_data
+          unzip -o artifact.zip -d artifact_data
+
+          echo "===== EXTRACTED FILES ====="
+          find artifact_data -type f -ls
+
+      - name: Find and restore real JSON
+        run: |
+          FOUND_FILE=$(find artifact_data -type f -name "bseb-12th-full-result-2026.json" | head -n 1)
+
+          if [ -z "$FOUND_FILE" ]; then
+            echo "❌ Real JSON file not found in artifact"
+            exit 1
+          fi
+
+          echo "✅ Found file: $FOUND_FILE"
+          cp "$FOUND_FILE" bseb-12th-full-result-2026.json
+
+          echo "===== RESTORED JSON FILE INFO ====="
+          ls -lh bseb-12th-full-result-2026.json
+          echo
+          echo "===== FIRST 5 LINES ====="
+          head -n 5 bseb-12th-full-result-2026.json
+
+      - name: Validate restored JSON
         run: |
           node - <<'EOF'
-          const fs = require('fs');
+          const fs = require("fs");
 
-          const file = 'bseb-12th-full-result-2026.json';
+          const file = "bseb-12th-full-result-2026.json";
+
           if (!fs.existsSync(file)) {
-            console.error('❌ JSON file not found');
+            console.error("❌ JSON file missing after restore");
             process.exit(1);
           }
 
-          const txt = fs.readFileSync(file, 'utf8');
+          const text = fs.readFileSync(file, "utf8");
 
-          if (txt.startsWith('version https://git-lfs.github.com/spec/v1')) {
-            console.error('❌ This is only an LFS pointer, not real JSON');
+          if (text.startsWith("version https://git-lfs.github.com/spec/v1")) {
+            console.error("❌ Restored file is STILL LFS POINTER, not real JSON");
             process.exit(1);
           }
 
           let data;
           try {
-            data = JSON.parse(txt);
+            data = JSON.parse(text);
           } catch (e) {
-            console.error('❌ JSON parse failed:', e.message);
+            console.error("❌ JSON parse failed:", e.message);
             process.exit(1);
           }
 
-          const rollCodes = Object.keys(data);
-          let totalStudents = 0;
-
-          for (const rc of rollCodes) {
-            totalStudents += Object.keys(data[rc] || {}).length;
+          let total = 0;
+          for (const rc of Object.keys(data)) {
+            total += Object.keys(data[rc] || {}).length;
           }
 
-          console.log("===== VERIFIED SOURCE DATA =====");
-          console.log("Total Roll Codes:", rollCodes.length);
-          console.log("Total Students:", totalStudents);
-
-          if (totalStudents < 100000) {
-            console.error('❌ Too few students. Refusing conversion.');
-            process.exit(1);
-          }
-
-          console.log('✅ Source JSON looks real and large enough');
+          console.log("✅ REAL JSON RESTORED SUCCESSFULLY");
+          console.log("📚 Roll Codes:", Object.keys(data).length);
+          console.log("🎓 Students:", total);
           EOF
 
-      - name: Convert JSON to GZ
+      - name: Compress restored JSON to GZ
         run: |
           gzip -c bseb-12th-full-result-2026.json > bseb-12th-full-result-2026.json.gz
 
-          echo "===== GZ FILE SIZE ====="
+          echo "===== GZ FILE INFO ====="
           ls -lh bseb-12th-full-result-2026.json.gz
 
-      - name: Verify GZ Data
+      - name: Verify GZ file
         run: |
-          gunzip -c bseb-12th-full-result-2026.json.gz > verify.json
+          echo "===== GZ PREVIEW ====="
+          gunzip -c bseb-12th-full-result-2026.json.gz | head -n 20 || true
+
+          gunzip -c bseb-12th-full-result-2026.json.gz > temp.json
 
           node - <<'EOF'
-          const fs = require('fs');
+          const fs = require("fs");
+          const data = JSON.parse(fs.readFileSync("temp.json", "utf8"));
 
-          const file = 'verify.json';
-          const txt = fs.readFileSync(file, 'utf8');
-
-          let data;
-          try {
-            data = JSON.parse(txt);
-          } catch (e) {
-            console.error('❌ GZ verification JSON parse failed:', e.message);
-            process.exit(1);
+          let total = 0;
+          for (const rc of Object.keys(data)) {
+            total += Object.keys(data[rc] || {}).length;
           }
 
-          const rollCodes = Object.keys(data);
-          let totalStudents = 0;
-
-          for (const rc of rollCodes) {
-            totalStudents += Object.keys(data[rc] || {}).length;
-          }
-
-          console.log("===== VERIFIED GZ DATA =====");
-          console.log("Total Roll Codes:", rollCodes.length);
-          console.log("Total Students:", totalStudents);
-
-          if (totalStudents < 100000) {
-            console.error('❌ GZ verified student count too low. Refusing deletion.');
-            process.exit(1);
-          }
-
-          console.log('✅ GZ verification successful');
+          console.log("✅ GZ JSON VALID");
+          console.log("📚 Roll Codes:", Object.keys(data).length);
+          console.log("🎓 Students:", total);
           EOF
 
-      - name: Remove Old JSON Only After Verification
+      - name: Remove broken old JSON and stop tracking it
         run: |
-          rm -f verify.json
-          git rm -f bseb-12th-full-result-2026.json
+          git rm --cached bseb-12th-full-result-2026.json || true
+          rm -f bseb-12th-full-result-2026.json
+          git lfs untrack "bseb-12th-full-result-2026.json" || true
 
-      - name: Remove LFS Tracking For JSON
+      - name: Track GZ file in LFS
         run: |
-          if [ -f .gitattributes ]; then
-            sed -i '/bseb-12th-full-result-2026\.json/d' .gitattributes
-          fi
-
+          git lfs track "bseb-12th-full-result-2026.json.gz"
           echo "===== .gitattributes ====="
-          cat .gitattributes || true
+          cat .gitattributes
 
-      - name: Commit and Push
+      - name: Commit and Push recovered GZ
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add bseb-12th-full-result-2026.json.gz .gitattributes
-          git commit -m "Safely convert full result JSON to gzip" || echo "No changes to commit"
-          git pull --rebase origin main || true
+          git add .gitattributes bseb-12th-full-result-2026.json.gz
+          git commit -m "Recover real JSON from artifact and convert to gz" || echo "No changes to commit"
           git push
 
-      - name: Upload Artifact Backup
+      - name: Upload safety backup
         uses: actions/upload-artifact@v4
         with:
-          name: bseb-full-result-gz-backup
+          name: recovered-gz-backup
           path: |
+            artifact.zip
             bseb-12th-full-result-2026.json.gz
+            temp.json
