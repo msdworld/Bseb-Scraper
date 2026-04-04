@@ -1,62 +1,136 @@
-name: Check Real JSON File
+name: BSEB Full Recheck GZ
 
 on:
   workflow_dispatch:
 
 jobs:
-  check:
+  scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    permissions:
+      contents: write
 
     steps:
-      - name: Checkout WITHOUT LFS
+      - name: Checkout Repo WITHOUT LFS
         uses: actions/checkout@v4
         with:
           lfs: false
-          fetch-depth: 1
+          persist-credentials: true
 
-      - name: Disable Git LFS hooks
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Show Existing Files
         run: |
-          git lfs uninstall || true
-          git config --global filter.lfs.required false
-          git config --global filter.lfs.smudge "git-lfs smudge --skip -- %f"
-          git config --global filter.lfs.process "git-lfs filter-process --skip"
+          echo "===== ROOT FILES ====="
+          ls -lh
+          echo
+          echo "===== GZ FILE ====="
+          ls -lh bseb-12th-full-result-2026.json.gz || echo "No GZ file found"
+          echo
+          echo "===== PROGRESS FILE ====="
+          cat progress.txt || echo "No progress file yet"
 
-      - name: Show file details
-        run: |
-          echo "===== FILE INFO ====="
-          ls -lh bseb-12th-full-result-2026.json || true
-
-          echo "===== FIRST 10 LINES ====="
-          head -n 10 bseb-12th-full-result-2026.json || true
-
-          echo "===== CHECK TYPE ====="
-          file bseb-12th-full-result-2026.json || true
-
-      - name: Detect real JSON or LFS pointer
+      - name: Validate GZ Before Run
         run: |
           node - <<'EOF'
           const fs = require("fs");
+          const zlib = require("zlib");
 
-          const file = "bseb-12th-full-result-2026.json";
+          const file = "bseb-12th-full-result-2026.json.gz";
 
           if (!fs.existsSync(file)) {
-            console.log("❌ File not found");
-            process.exit(1);
-          }
-
-          const raw = fs.readFileSync(file, "utf8").slice(0, 500);
-
-          if (raw.includes("version https://git-lfs.github.com/spec")) {
-            console.log("❌ THIS IS ONLY AN LFS POINTER, NOT REAL JSON");
+            console.error("❌ GZ file not found");
             process.exit(1);
           }
 
           try {
-            JSON.parse(fs.readFileSync(file, "utf8"));
-            console.log("✅ REAL JSON FILE FOUND");
+            const text = zlib.gunzipSync(fs.readFileSync(file)).toString("utf8");
+            const data = JSON.parse(text);
+
+            let total = 0;
+            for (const rc of Object.keys(data)) {
+              total += Object.keys(data[rc] || {}).length;
+            }
+
+            console.log("✅ GZ VALID BEFORE RUN");
+            console.log("📚 Roll Codes:", Object.keys(data).length);
+            console.log("🎓 Students:", total);
           } catch (e) {
-            console.log("⚠️ File exists but is not valid JSON");
-            console.log(e.message);
+            console.error("❌ GZ validation failed:", e.message);
             process.exit(1);
           }
           EOF
+
+      - name: Run Recheck Script
+        run: node script.js
+
+      - name: Validate GZ After Run
+        if: always()
+        run: |
+          node - <<'EOF'
+          const fs = require("fs");
+          const zlib = require("zlib");
+
+          const file = "bseb-12th-full-result-2026.json.gz";
+
+          if (!fs.existsSync(file)) {
+            console.error("❌ GZ file missing after run");
+            process.exit(1);
+          }
+
+          try {
+            const text = zlib.gunzipSync(fs.readFileSync(file)).toString("utf8");
+            const data = JSON.parse(text);
+
+            let total = 0;
+            for (const rc of Object.keys(data)) {
+              total += Object.keys(data[rc] || {}).length;
+            }
+
+            console.log("✅ GZ VALID AFTER RUN");
+            console.log("📚 Roll Codes:", Object.keys(data).length);
+            console.log("🎓 Students:", total);
+          } catch (e) {
+            console.error("❌ GZ validation failed after run:", e.message);
+            process.exit(1);
+          }
+          EOF
+
+      - name: Show Final Files
+        if: always()
+        run: |
+          echo "===== FINAL FILES ====="
+          ls -lh
+          echo
+          echo "===== GZ FILE SIZE ====="
+          ls -lh bseb-12th-full-result-2026.json.gz || true
+          echo
+          echo "===== PROGRESS ====="
+          cat progress.txt || true
+
+      - name: Commit and Push Updated GZ
+        if: always()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add bseb-12th-full-result-2026.json.gz progress.txt
+          git commit -m "Update BSEB recheck data (gz)" || echo "No changes to commit"
+          git pull --rebase origin main || true
+          git push
+
+      - name: Upload Backup Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseb-recheck-gz-backup
+          path: |
+            bseb-12th-full-result-2026.json.gz
+            progress.txt
