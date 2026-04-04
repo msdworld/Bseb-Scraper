@@ -1,4 +1,4 @@
-name: BSEB Full Recheck
+name: BSEB Json GZ Full Recheck
 
 on:
   workflow_dispatch:
@@ -9,6 +9,7 @@ jobs:
 
     permissions:
       contents: write
+      actions: read
 
     steps:
       - name: Checkout Repo (NO LFS)
@@ -25,18 +26,30 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Download REAL backup artifact
+      - name: Install unzip + jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip jq
+
+      - name: Download REAL artifact by ID
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: 23970248171
+          ARTIFACT_ID: 6269148355
         run: |
           set -e
+
           echo "===== DOWNLOADING ARTIFACT ====="
+          echo "Run ID: $RUN_ID"
+          echo "Artifact ID: $ARTIFACT_ID"
 
           curl -L \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://github.com/msdworld/Bseb-Scraper/actions/runs/23970248171/artifacts/6269148355" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip" \
             -o artifact.zip
 
-          echo "===== ARTIFACT FILE ====="
+          echo "===== ARTIFACT ZIP ====="
           ls -lh artifact.zip
 
       - name: Extract artifact
@@ -46,7 +59,7 @@ jobs:
           unzip -o artifact.zip -d artifact_data
 
           echo "===== ARTIFACT CONTENTS ====="
-          find artifact_data -type f | sort
+          find artifact_data -type f | sort || true
 
       - name: Restore real JSON
         run: |
@@ -54,13 +67,13 @@ jobs:
 
           if [ -f "artifact_data/bseb-12th-full-result-2026.json" ]; then
             cp artifact_data/bseb-12th-full-result-2026.json bseb-12th-full-result-2026.json
-            echo "✅ Restored JSON directly"
+            echo "✅ Restored JSON directly from artifact"
           elif [ -f "artifact_data/bseb-12th-full-result-2026.json.gz" ]; then
             cp artifact_data/bseb-12th-full-result-2026.json.gz bseb-12th-full-result-2026.json.gz
             gunzip -f bseb-12th-full-result-2026.json.gz
-            echo "✅ Restored JSON from GZ"
+            echo "✅ Restored JSON from artifact GZ"
           else
-            echo "❌ Real JSON not found inside artifact"
+            echo "❌ No real JSON found inside artifact"
             exit 1
           fi
 
@@ -76,8 +89,15 @@ jobs:
             process.exit(1);
           }
 
+          const raw = fs.readFileSync(file, "utf8");
+
+          if (raw.startsWith("version https://git-lfs.github.com/spec/v1")) {
+            console.error("❌ This is still an LFS pointer, not real JSON");
+            process.exit(1);
+          }
+
           try {
-            const data = JSON.parse(fs.readFileSync(file, "utf8"));
+            const data = JSON.parse(raw);
             const rollCodes = Object.keys(data);
             let total = 0;
 
@@ -88,6 +108,11 @@ jobs:
             console.log("✅ JSON valid");
             console.log("📚 Roll Codes:", rollCodes.length);
             console.log("🎓 Students:", total);
+
+            if (total < 100000) {
+              console.error("❌ Loaded data looks too small. Stopping for safety.");
+              process.exit(1);
+            }
           } catch (e) {
             console.error("❌ JSON parse failed:", e.message);
             process.exit(1);
