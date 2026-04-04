@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  scrape:
+  recheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     permissions:
       contents: write
@@ -26,103 +25,66 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Show Existing Files Before Run
+      - name: Show Existing Files
         run: |
           echo "===== ROOT FILES ====="
           ls -lh
-          echo "===== JSON ====="
-          ls -lh bseb-12th-full-result-2026.json || true
-          echo "===== GZ ====="
-          ls -lh bseb-12th-full-result-2026.json.gz || true
-
-      - name: Validate Existing Data
-        run: |
-          node - <<'EOF'
-          const fs = require("fs");
-          const zlib = require("zlib");
-
-          const jsonFile = "bseb-12th-full-result-2026.json";
-          const gzFile = "bseb-12th-full-result-2026.json.gz";
-
-          let ok = false;
-
-          if (fs.existsSync(gzFile)) {
-            try {
-              const raw = fs.readFileSync(gzFile);
-              const txt = zlib.gunzipSync(raw).toString("utf8");
-              const data = JSON.parse(txt);
-              let total = 0;
-              for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
-              console.log(`✅ GZ valid | Roll Codes: ${Object.keys(data).length} | Students: ${total}`);
-              ok = true;
-            } catch (e) {
-              console.log(`⚠️ GZ invalid: ${e.message}`);
-            }
-          }
-
-          if (!ok && fs.existsSync(jsonFile)) {
-            try {
-              const data = JSON.parse(fs.readFileSync(jsonFile, "utf8"));
-              let total = 0;
-              for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
-              console.log(`✅ JSON valid | Roll Codes: ${Object.keys(data).length} | Students: ${total}`);
-              ok = true;
-            } catch (e) {
-              console.log(`⚠️ JSON invalid: ${e.message}`);
-            }
-          }
-
-          if (!ok) {
-            console.log("⚠️ No valid previous data found. Script will still run, but be careful.");
-          }
-          EOF
+          echo ""
+          echo "===== GZ FILE INFO ====="
+          ls -lh bseb-12th-full-result-2026.json.gz || echo "No GZ found"
+          echo ""
+          echo "===== JSON FILE INFO ====="
+          ls -lh bseb-12th-full-result-2026.json || echo "No JSON found"
 
       - name: Run Recheck Script
         run: node script.js
 
-      - name: Verify Output After Run
+      - name: Verify Saved GZ
         if: always()
         run: |
-          echo "===== OUTPUT FILES ====="
-          ls -lh bseb-12th-full-result-2026.json* || true
+          node -e "
+          const fs = require('fs');
+          const zlib = require('zlib');
 
-          node - <<'EOF'
-          const fs = require("fs");
-          const zlib = require("zlib");
-
-          const gzFile = "bseb-12th-full-result-2026.json.gz";
-
-          if (!fs.existsSync(gzFile)) {
-            console.log("❌ GZ file missing after run");
+          if (!fs.existsSync('bseb-12th-full-result-2026.json.gz')) {
+            console.log('❌ GZ file not found');
             process.exit(1);
           }
 
-          const raw = fs.readFileSync(gzFile);
-          const txt = zlib.gunzipSync(raw).toString("utf8");
-          const data = JSON.parse(txt);
+          const raw = fs.readFileSync('bseb-12th-full-result-2026.json.gz');
 
-          let total = 0;
-          for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
+          try {
+            let txt;
+            if (raw[0] === 0x1f && raw[1] === 0x8b) {
+              txt = zlib.gunzipSync(raw).toString('utf8');
+              console.log('✅ Real gzip detected');
+            } else {
+              txt = raw.toString('utf8');
+              console.log('⚠️ File is plain JSON with .gz name');
+            }
 
-          console.log(`✅ Final GZ valid | Roll Codes: ${Object.keys(data).length} | Students: ${total}`);
+            const data = JSON.parse(txt);
+            let total = 0;
+            for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
 
-          if (total === 0) {
-            console.log("❌ Refusing empty dataset");
+            console.log('📚 Roll Codes:', Object.keys(data).length);
+            console.log('🎓 Students:', total);
+          } catch (e) {
+            console.log('❌ Validation failed:', e.message);
             process.exit(1);
           }
-          EOF
+          "
 
-      - name: Commit and Push Results
+      - name: Commit and Push
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add script.js
-          git add bseb-12th-full-result-2026.json
           git add bseb-12th-full-result-2026.json.gz
+          git add bseb-12th-full-result-2026.json
 
-          git commit -m "Recheck BSEB full result data" || echo "No changes to commit"
+          git commit -m "Update BSEB recheck data" || echo "No changes to commit"
           git pull --rebase origin main || true
           git push
 
@@ -132,5 +94,5 @@ jobs:
         with:
           name: bseb-recheck-backup
           path: |
-            bseb-12th-full-result-2026.json
             bseb-12th-full-result-2026.json.gz
+            bseb-12th-full-result-2026.json
