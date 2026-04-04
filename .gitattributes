@@ -1,1 +1,4 @@
 
+# Do NOT use LFS for these files
+*.json -filter -diff -merge -text
+*.gz -filter -diff -merge -text
