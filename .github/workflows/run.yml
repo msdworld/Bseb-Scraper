@@ -1,4 +1,4 @@
-name: BSEB Full Result Recheck
+name: BSEB Recheck Scraper
 
 on:
   workflow_dispatch:
@@ -11,11 +11,26 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout Repo
+      - name: Checkout Repo WITHOUT LFS
         uses: actions/checkout@v4
         with:
           persist-credentials: true
           lfs: false
+          fetch-depth: 1
+
+      - name: Disable Git LFS completely
+        run: |
+          git lfs uninstall || true
+          git config --global filter.lfs.required false
+          git config --global filter.lfs.smudge "git-lfs smudge --skip -- %f"
+          git config --global filter.lfs.process "git-lfs filter-process --skip"
+
+      - name: Show files after checkout
+        run: |
+          echo "===== ROOT FILES ====="
+          ls -lh
+          echo "===== GITATTRIBUTES ====="
+          cat .gitattributes || echo "No .gitattributes"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -25,66 +40,86 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Restore JSON from GZ
+      - name: If GZ exists, unzip it for script
         run: |
-          if [ -f bseb-12th-full-result-2026.json.gz ]; then
-            echo "📦 Found compressed master file"
+          if [ -f "bseb-12th-full-result-2026.json.gz" ]; then
+            echo "📦 Found gz file. Extracting..."
             gunzip -c bseb-12th-full-result-2026.json.gz > bseb-12th-full-result-2026.json
-            echo "✅ JSON restored from GZ"
+            echo "✅ Extracted JSON"
           else
-            echo "{}" > bseb-12th-full-result-2026.json
-            echo "⚠️ No GZ found, created empty JSON"
+            echo "⚠️ No gz found. Creating blank JSON if needed..."
+            [ -f "bseb-12th-full-result-2026.json" ] || echo "{}" > bseb-12th-full-result-2026.json
           fi
 
+      - name: Verify extracted JSON
+        run: |
           echo "===== JSON FILE SIZE ====="
-          ls -lh bseb-12th-full-result-2026.json
+          ls -lh bseb-12th-full-result-2026.json || true
 
-          echo "===== JSON START ====="
-          head -n 10 bseb-12th-full-result-2026.json || true
+          node - <<'EOF'
+          const fs = require("fs");
+
+          try {
+            const raw = fs.readFileSync("bseb-12th-full-result-2026.json", "utf8");
+            const json = JSON.parse(raw);
+            let total = 0;
+            for (const rc of Object.keys(json)) {
+              total += Object.keys(json[rc] || {}).length;
+            }
+            console.log("✅ JSON valid");
+            console.log("📚 Roll Codes:", Object.keys(json).length);
+            console.log("🎓 Students:", total);
+          } catch (e) {
+            console.error("❌ JSON invalid:", e.message);
+            process.exit(1);
+          }
+          EOF
 
       - name: Run Script
         run: node script.js
 
-      - name: Compress JSON back to GZ
+      - name: Re-compress JSON
         if: always()
         run: |
-          if [ -f bseb-12th-full-result-2026.json ]; then
+          if [ -f "bseb-12th-full-result-2026.json" ]; then
             gzip -c bseb-12th-full-result-2026.json > bseb-12th-full-result-2026.json.gz
-            echo "✅ JSON compressed back to GZ"
+            echo "✅ GZ created"
+            ls -lh bseb-12th-full-result-2026.json.gz
+          else
+            echo "❌ JSON not found after script"
+            exit 1
           fi
 
-      - name: Show Saved Files
+      - name: Show final files
         if: always()
         run: |
-          echo "===== FILE LIST ====="
-          ls -lah
-
-          echo "===== GZ FILE SIZE ====="
+          echo "===== FINAL FILES ====="
+          ls -lh
+          echo "===== GZ SIZE ====="
           ls -lh bseb-12th-full-result-2026.json.gz || true
+          echo "===== PROGRESS ====="
+          cat progress.txt || echo "No progress file"
 
-          echo "===== PROGRESS FILE ====="
-          cat progress.txt || echo "Progress file not found"
-
-      - name: Cleanup JSON
-        if: always()
-        run: rm -f bseb-12th-full-result-2026.json
-
-      - name: Commit and Push Results
+      - name: Commit and Push
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add bseb-12th-full-result-2026.json.gz progress.txt
-          git commit -m "Update BSEB full result data" || echo "No changes to commit"
+          # remove normal json from git if it exists
+          git rm --cached bseb-12th-full-result-2026.json 2>/dev/null || true
+          rm -f bseb-12th-full-result-2026.json || true
+
+          git add bseb-12th-full-result-2026.json.gz progress.txt .gitattributes
+          git commit -m "Update BSEB recheck data" || echo "No changes to commit"
           git pull --rebase origin main || true
           git push
 
-      - name: Upload Result Files
+      - name: Upload Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseb-full-result-data
+          name: bseb-recheck-output
           path: |
             bseb-12th-full-result-2026.json.gz
             progress.txt
