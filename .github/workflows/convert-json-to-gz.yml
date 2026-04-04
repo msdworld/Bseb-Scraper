@@ -191,20 +191,20 @@ jobs:
           }
           EOF
 
-      - name: Show Final Stats
+      - name: Show Saved Files
         if: always()
         run: |
-          echo "===== ROOT FILES ====="
+          echo "===== FILE LIST ====="
           ls -lah
 
           echo "===== JSON FILE SIZE ====="
-          du -h bseb-12th-full-result-2026.json || true
+          [ -f bseb-12th-full-result-2026.json ] && du -h bseb-12th-full-result-2026.json || echo "No raw JSON present"
 
           echo "===== GZ FILE SIZE ====="
-          du -h bseb-12th-full-result-2026.json.gz || true
+          [ -f bseb-12th-full-result-2026.json.gz ] && du -h bseb-12th-full-result-2026.json.gz || echo "No GZ present"
 
           echo "===== PROGRESS ====="
-          cat progress.txt || true
+          cat progress.txt || echo "No progress file"
 
       - name: Commit and Push Results
         if: always()
@@ -212,7 +212,12 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          [ -f bseb-12th-full-result-2026.json ] && git add bseb-12th-full-result-2026.json
+          # IMPORTANT: never push raw JSON (too big)
+          git restore --staged bseb-12th-full-result-2026.json || true
+          git checkout -- bseb-12th-full-result-2026.json || true
+          rm -f bseb-12th-full-result-2026.json || true
+
+          # Add only safe files
           [ -f bseb-12th-full-result-2026.json.gz ] && git add bseb-12th-full-result-2026.json.gz
           [ -f progress.txt ] && git add progress.txt
           [ -f script.js ] && git add script.js
@@ -222,6 +227,8 @@ jobs:
           git commit -m "Update BSEB recheck data" || echo "No changes to commit"
           git pull --rebase origin main || true
           git push
+
+          
 
       - name: Upload fresh backup artifact
         if: always()
