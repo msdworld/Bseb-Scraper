@@ -11,27 +11,29 @@ const POST_URL = "https://interbiharboard.com/Result/GetResult";
 const SHOW_RESULT_URL = "https://interbiharboard.com/Result/ShowResult";
 
 const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
-const OUTPUT_JSON = "bseb-12th-full-result-2026.json";
-const OUTPUT_GZ = "bseb-12th-full-result-2026.json.gz";
 
-// Recheck fixed range for every roll code
+// MAIN DATA FILES
+const GZ_FILE = "bseb-12th-full-result-2026.json.gz";
+const TEMP_JSON_FILE = "bseb-12th-full-result-2026.json";
+
+// Roll number range
 const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
-// Speed
-const ROLLCODE_PARALLEL = 25; // increase if stable
-const CONCURRENCY = 120;      // increase if stable
+// SPEED
+const ROLLCODE_PARALLEL = 25;   // increase carefully
+const CONCURRENCY = 120;        // per roll code
 const BATCH_SIZE = 120;
 const REQUEST_TIMEOUT = 8000;
 
-// Save
+// SAVE
 const SAVE_EVERY_VALID_RESULTS = 100;
 
 // ===============================
-// SPLIT RANGE (CHANGE EVERY RUN)
+// SPLIT RANGE
 // ===============================
 const START_INDEX = 6000;
-const END_INDEX = 6020;
+const END_INDEX = 6050;
 
 // ===============================
 // AXIOS CLIENT
@@ -104,9 +106,9 @@ function mergeCookies(oldCookieHeader, newSetCookies = []) {
 }
 
 // ===============================
-// SAFE JSON LOADER
+// SAFE LOADERS
 // ===============================
-function loadJSON(file, fallback = {}) {
+function loadJSONSafe(file, fallback = {}) {
   if (!fs.existsSync(file)) return fallback;
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -116,39 +118,69 @@ function loadJSON(file, fallback = {}) {
 }
 
 function loadMainData() {
-  // 1) Prefer real gzip if valid
-  if (fs.existsSync(OUTPUT_GZ)) {
+  // 1) Try real .gz
+  if (fs.existsSync(GZ_FILE)) {
     try {
-      const gzBuffer = fs.readFileSync(OUTPUT_GZ);
-      const jsonText = zlib.gunzipSync(gzBuffer).toString("utf8");
-      const parsed = JSON.parse(jsonText);
+      const raw = fs.readFileSync(GZ_FILE);
 
-      const total = countTotalStudentsSaved(parsed);
-      console.log(`📦 Loaded from GZ | Roll Codes: ${Object.keys(parsed).length} | Students: ${total}`);
-      return parsed;
+      // Check gzip magic bytes
+      if (raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b) {
+        const unzipped = zlib.gunzipSync(raw).toString("utf8");
+        const parsed = JSON.parse(unzipped);
+        console.log(`✅ Loaded real GZ data`);
+        return parsed;
+      }
+
+      // If not real gzip, maybe plain JSON saved with .gz extension
+      try {
+        const asText = raw.toString("utf8");
+        const parsed = JSON.parse(asText);
+        console.log(`⚠️ GZ file was actually plain JSON. Loaded safely.`);
+        return parsed;
+      } catch {}
+
+      console.log(`❌ GZ exists but is invalid`);
     } catch (err) {
-      console.log(`⚠️ GZ load failed: ${err.message}`);
+      console.log(`❌ GZ load failed: ${err.message}`);
     }
   }
 
-  // 2) Fallback to JSON if valid
-  if (fs.existsSync(OUTPUT_JSON)) {
+  // 2) Try temp json fallback
+  if (fs.existsSync(TEMP_JSON_FILE)) {
     try {
-      const parsed = JSON.parse(fs.readFileSync(OUTPUT_JSON, "utf8"));
-      const total = countTotalStudentsSaved(parsed);
-      console.log(`📦 Loaded from JSON | Roll Codes: ${Object.keys(parsed).length} | Students: ${total}`);
+      const parsed = JSON.parse(fs.readFileSync(TEMP_JSON_FILE, "utf8"));
+      console.log(`✅ Loaded fallback JSON data`);
       return parsed;
     } catch (err) {
-      console.log(`⚠️ JSON load failed: ${err.message}`);
+      console.log(`❌ JSON fallback invalid: ${err.message}`);
     }
   }
 
-  console.log("⚠️ No valid existing data found. Starting with empty object.");
+  console.log(`⚠️ No valid previous data found. Script will still run, but be careful.`);
   return {};
 }
 
+function saveCompressedJSON(data) {
+  const jsonString = buildCustomJSONString(data);
+
+  // Save temp json first (safety)
+  fs.writeFileSync(TEMP_JSON_FILE, jsonString, "utf8");
+
+  // Save real gzip
+  const gz = zlib.gzipSync(Buffer.from(jsonString, "utf8"), { level: 9 });
+  fs.writeFileSync(GZ_FILE, gz);
+
+  // Validate immediately
+  try {
+    const test = zlib.gunzipSync(fs.readFileSync(GZ_FILE)).toString("utf8");
+    JSON.parse(test);
+  } catch (err) {
+    throw new Error(`GZ validation failed after save: ${err.message}`);
+  }
+}
+
 // ===============================
-// SAVE JSON + GZ
+// CUSTOM JSON FORMATTER
 // ===============================
 function formatStudent(student, indent = "    ") {
   const lines = [];
@@ -186,7 +218,7 @@ function formatStudent(student, indent = "    ") {
   return lines.join("\n");
 }
 
-function buildCustomJSON(data) {
+function buildCustomJSONString(data) {
   const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
   const lines = [];
   lines.push("{");
@@ -212,31 +244,6 @@ function buildCustomJSON(data) {
 
   lines.push("}");
   return lines.join("\n");
-}
-
-function saveBoth(data) {
-  const jsonText = buildCustomJSON(data);
-
-  // safety: don't write empty/broken
-  let parsed;
-  try {
-    parsed = JSON.parse(jsonText);
-  } catch (err) {
-    console.log(`❌ Refusing to save invalid JSON: ${err.message}`);
-    return false;
-  }
-
-  const total = countTotalStudentsSaved(parsed);
-  if (total === 0) {
-    console.log("❌ Refusing to save because total students = 0");
-    return false;
-  }
-
-  fs.writeFileSync(OUTPUT_JSON, jsonText, "utf8");
-  fs.writeFileSync(OUTPUT_GZ, zlib.gzipSync(Buffer.from(jsonText, "utf8")));
-
-  console.log(`💾 Saved JSON + GZ | Students: ${total}`);
-  return true;
 }
 
 function countTotalStudentsSaved(fullResults) {
@@ -307,6 +314,7 @@ function parseSubjects($) {
       if (cells[4]) obj.practical = clean(cells[4] || "");
       if (cells[5]) obj.regulationTheory = clean(cells[5] || "");
       if (cells[6]) obj.regulationPractical = clean(cells[6] || "");
+
       if (currentAdditionalSection) obj.extra = currentAdditionalSection;
 
       subjects.push(obj);
@@ -469,7 +477,7 @@ async function fetchStudentResult(rollCode, rollNo) {
 // LOAD VALID ROLL CODES
 // ===============================
 function loadValidRollCodes() {
-  const raw = loadJSON(VALID_ROLL_CODE_FILE, {});
+  const raw = loadJSONSafe(VALID_ROLL_CODE_FILE, {});
   return Object.keys(raw)
     .filter(code => /^\d+$/.test(code))
     .sort((a, b) => Number(a) - Number(b));
@@ -485,16 +493,16 @@ const saveState = {
 };
 
 // ===============================
-// PROCESS ONE ROLL CODE
+// PROCESS ONE ROLL CODE (FULL RECHECK)
 // ===============================
 async function processRollCode(rollCode) {
   if (!saveState.fullResults[rollCode]) saveState.fullResults[rollCode] = {};
 
   const alreadySavedForRollCode = Object.keys(saveState.fullResults[rollCode]).length;
-  console.log(`▶️ Rechecking ${rollCode} (already saved: ${alreadySavedForRollCode})`);
-
   let newSaved = 0;
   let skippedExisting = 0;
+
+  console.log(`▶️ Rechecking ${rollCode} (already saved: ${alreadySavedForRollCode})`);
 
   for (let current = ROLLNO_START; current <= ROLLNO_END; current += BATCH_SIZE) {
     const batchEnd = Math.min(current + BATCH_SIZE - 1, ROLLNO_END);
@@ -523,13 +531,13 @@ async function processRollCode(rollCode) {
         }
 
         saveState.fullResults[rollCode][rn] = result.data;
-        saveState.unsavedValidCount++;
         saveState.totalStudentsSaved++;
+        saveState.unsavedValidCount++;
         newSaved++;
       }
 
       if (saveState.unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
-        saveBoth(saveState.fullResults);
+        saveCompressedJSON(saveState.fullResults);
         console.log(`💾 Progress Saved | Total Saved: ${saveState.totalStudentsSaved}`);
         saveState.unsavedValidCount = 0;
       }
@@ -569,7 +577,7 @@ async function processRollCode(rollCode) {
   console.log(`📚 Total valid roll codes available: ${allValidRollCodes.length}`);
   console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
   console.log(`📦 Roll codes in this run: ${selectedRollCodes.length}`);
-  console.log(`📦 Already saved students in dataset: ${saveState.totalStudentsSaved}`);
+  console.log(`📦 Already saved students in JSON: ${saveState.totalStudentsSaved}`);
   console.log(`⚡ Parallel roll codes: ${ROLLCODE_PARALLEL}`);
   console.log(`⚡ Concurrency per roll code: ${CONCURRENCY}`);
 
@@ -578,14 +586,17 @@ async function processRollCode(rollCode) {
 
     console.log(`\n🚀 Roll code group: ${rollCodeChunk.join(", ")}`);
 
-    await Promise.all(
-      rollCodeChunk.map(rollCode => processRollCode(rollCode))
-    );
+    await Promise.all(rollCodeChunk.map(rollCode => processRollCode(rollCode)));
 
-    saveBoth(saveState.fullResults);
-    console.log(`💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | Total Saved: ${saveState.totalStudentsSaved}`);
+    saveCompressedJSON(saveState.fullResults);
+
+    console.log(
+      `💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | Total Saved: ${saveState.totalStudentsSaved}`
+    );
   }
 
-  saveBoth(saveState.fullResults);
-  console.log(`\n🎉 RECHECK COMPLETED | Range ${START_INDEX}-${END_INDEX} | Final Total Saved: ${saveState.totalStudentsSaved}`);
+  saveCompressedJSON(saveState.fullResults);
+
+  console.log(`\n🎉 FULL RECHECK COMPLETED`);
+  console.log(`📦 Final Total Saved: ${saveState.totalStudentsSaved}`);
 })();
