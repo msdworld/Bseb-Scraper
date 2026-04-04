@@ -1,10 +1,10 @@
-name: Check GZ File
+name: Inspect Current GZ Data
 
 on:
   workflow_dispatch:
 
 jobs:
-  check-gz:
+  inspect:
     runs-on: ubuntu-latest
 
     steps:
@@ -13,34 +13,54 @@ jobs:
         with:
           lfs: false
 
-      - name: Show Files
-        run: |
-          echo "===== ROOT FILES ====="
-          ls -lah
-
-      - name: Check GZ File
+      - name: Restore JSON from GZ
         run: |
           if [ ! -f bseb-12th-full-result-2026.json.gz ]; then
             echo "❌ GZ file not found"
             exit 1
           fi
 
-          echo "===== GZ FILE SIZE ====="
+          gunzip -c bseb-12th-full-result-2026.json.gz > bseb-12th-full-result-2026.json
+
+      - name: Inspect JSON
+        run: |
+          echo "===== FILE SIZES ====="
           ls -lh bseb-12th-full-result-2026.json.gz
+          ls -lh bseb-12th-full-result-2026.json
 
-          echo "===== TRY UNZIP ====="
-          gunzip -c bseb-12th-full-result-2026.json.gz | head -n 20 || true
+          echo "===== FIRST 20 LINES ====="
+          head -n 20 bseb-12th-full-result-2026.json || true
 
-          echo "===== CHECK IF VALID JSON ====="
-          gunzip -c bseb-12th-full-result-2026.json.gz > test.json || true
+          echo "===== LAST 20 LINES ====="
+          tail -n 20 bseb-12th-full-result-2026.json || true
 
-          node -e "
+      - name: Count Roll Codes and Students
+        run: |
+          node - <<'EOF'
           const fs = require('fs');
-          try {
-            const txt = fs.readFileSync('test.json','utf8');
-            JSON.parse(txt);
-            console.log('✅ VALID JSON');
-          } catch(e) {
-            console.log('❌ INVALID JSON:', e.message);
+
+          const file = 'bseb-12th-full-result-2026.json';
+          const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+
+          const rollCodes = Object.keys(data);
+          let totalStudents = 0;
+
+          for (const rc of rollCodes) {
+            totalStudents += Object.keys(data[rc] || {}).length;
           }
-          "
+
+          console.log("===== DATA SUMMARY =====");
+          console.log("Total Roll Codes:", rollCodes.length);
+          console.log("Total Students:", totalStudents);
+
+          console.log("\n===== FIRST 10 ROLL CODES =====");
+          console.log(rollCodes.slice(0, 10));
+
+          console.log("\n===== LAST 10 ROLL CODES =====");
+          console.log(rollCodes.slice(-10));
+
+          console.log("\n===== SAMPLE COUNTS =====");
+          for (const rc of rollCodes.slice(0, 20)) {
+            console.log(rc, "=>", Object.keys(data[rc] || {}).length);
+          }
+          EOF
