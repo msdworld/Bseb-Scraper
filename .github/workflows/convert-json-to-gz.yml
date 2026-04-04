@@ -1,0 +1,83 @@
+name: Convert JSON to GZ
+
+on:
+  workflow_dispatch:
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repo (without LFS)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          lfs: false
+
+      - name: Show current files
+        run: |
+          echo "===== ROOT FILES ====="
+          ls -lh
+          echo "===== FIRST 10 LINES OF JSON ====="
+          head -n 10 bseb-12th-full-result-2026.json || echo "JSON file missing"
+
+      - name: Check if JSON is real or LFS pointer
+        run: |
+          if grep -q "version https://git-lfs.github.com/spec/v1" bseb-12th-full-result-2026.json; then
+            echo "❌ This file is still an LFS pointer, not real JSON."
+            echo "You must first restore the actual JSON file into the repo."
+            exit 1
+          else
+            echo "✅ Real JSON detected."
+          fi
+
+      - name: Convert JSON to GZ
+        run: |
+          gzip -c bseb-12th-full-result-2026.json > bseb-12th-full-result-2026.json.gz
+          echo "✅ GZ created"
+
+      - name: Show file sizes
+        run: |
+          echo "===== FILE SIZES ====="
+          ls -lh bseb-12th-full-result-2026.json*
+          du -h bseb-12th-full-result-2026.json*
+          echo "===== GZ TEST ====="
+          gzip -t bseb-12th-full-result-2026.json.gz && echo "✅ GZ VALID"
+
+      - name: Remove old JSON file
+        run: |
+          rm -f bseb-12th-full-result-2026.json
+          echo "✅ Old JSON removed"
+
+      - name: Remove LFS tracking if exists
+        run: |
+          if [ -f .gitattributes ]; then
+            sed -i '/bseb-12th-full-result-2026\.json/d' .gitattributes
+            sed -i '/bseb-12th-full-result-2026\.json\.gz/d' .gitattributes
+            sed -i '/\*\.json filter=lfs/d' .gitattributes
+            sed -i '/\*\.gz filter=lfs/d' .gitattributes
+            echo "===== UPDATED .gitattributes ====="
+            cat .gitattributes || true
+          fi
+
+      - name: Commit and Push GZ version
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add bseb-12th-full-result-2026.json.gz .gitattributes
+          git rm -f bseb-12th-full-result-2026.json || true
+
+          git commit -m "Convert BSEB result JSON to GZ" || echo "No changes to commit"
+          git pull --rebase origin main || true
+          git push
+
+      - name: Upload artifact backup
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: converted-gz-backup
+          path: bseb-12th-full-result-2026.json.gz
