@@ -11,30 +11,27 @@ const POST_URL = "https://interbiharboard.com/Result/GetResult";
 const SHOW_RESULT_URL = "https://interbiharboard.com/Result/ShowResult";
 
 const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
-const OUTPUT_GZ_FILE = "bseb-12th-full-result-2026.json.gz";
-const TEMP_JSON_FILE = "bseb-12th-full-result-2026.json";
-const PROGRESS_FILE = "progress.txt";
+const OUTPUT_JSON = "bseb-12th-full-result-2026.json";
+const OUTPUT_GZ = "bseb-12th-full-result-2026.json.gz";
 
-// Roll number range per roll code
+// Recheck fixed range for every roll code
 const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
-// ===============================
-// SPEED CONFIG (TUNE THESE)
-// ===============================
-const ROLLCODE_PARALLEL = 30;   // how many roll codes together
-const CONCURRENCY = 150;        // roll numbers per roll code together
-const BATCH_SIZE = 150;         // should usually match CONCURRENCY
-const REQUEST_TIMEOUT = 7000;   // 7000 is fast, 8000 safer
+// Speed
+const ROLLCODE_PARALLEL = 25; // increase if stable
+const CONCURRENCY = 120;      // increase if stable
+const BATCH_SIZE = 120;
+const REQUEST_TIMEOUT = 8000;
 
-// Save frequency
-const SAVE_EVERY_NEW_STUDENTS = 100;
+// Save
+const SAVE_EVERY_VALID_RESULTS = 100;
 
 // ===============================
-// SPLIT RANGE (CHANGE EACH RUN)
+// SPLIT RANGE (CHANGE EVERY RUN)
 // ===============================
-const START_INDEX = 5900;
-const END_INDEX = 6200;
+const START_INDEX = 6000;
+const END_INDEX = 6020;
 
 // ===============================
 // AXIOS CLIENT
@@ -65,34 +62,6 @@ function clean(txt) {
 
 function generateCaptcha() {
   return String(Math.floor(100000 + Math.random() * 900000));
-}
-
-function loadJSON(file, fallback = {}) {
-  if (!fs.existsSync(file)) return fallback;
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-
-function loadGzipJSON(gzFile, fallback = {}) {
-  if (!fs.existsSync(gzFile)) return fallback;
-  try {
-    const compressed = fs.readFileSync(gzFile);
-    const text = zlib.gunzipSync(compressed).toString("utf8");
-    return JSON.parse(text);
-  } catch (e) {
-    console.log(`❌ Failed to read ${gzFile}: ${e.message}`);
-    return fallback;
-  }
-}
-
-function saveGzipJSON(gzFile, data) {
-  const jsonText = JSON.stringify(data);
-  fs.writeFileSync(TEMP_JSON_FILE, jsonText, "utf8");
-  const compressed = zlib.gzipSync(Buffer.from(jsonText, "utf8"));
-  fs.writeFileSync(gzFile, compressed);
 }
 
 function detectAdditionalSection(text) {
@@ -134,16 +103,148 @@ function mergeCookies(oldCookieHeader, newSetCookies = []) {
     .join("; ");
 }
 
+// ===============================
+// SAFE JSON LOADER
+// ===============================
+function loadJSON(file, fallback = {}) {
+  if (!fs.existsSync(file)) return fallback;
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function loadMainData() {
+  // 1) Prefer real gzip if valid
+  if (fs.existsSync(OUTPUT_GZ)) {
+    try {
+      const gzBuffer = fs.readFileSync(OUTPUT_GZ);
+      const jsonText = zlib.gunzipSync(gzBuffer).toString("utf8");
+      const parsed = JSON.parse(jsonText);
+
+      const total = countTotalStudentsSaved(parsed);
+      console.log(`📦 Loaded from GZ | Roll Codes: ${Object.keys(parsed).length} | Students: ${total}`);
+      return parsed;
+    } catch (err) {
+      console.log(`⚠️ GZ load failed: ${err.message}`);
+    }
+  }
+
+  // 2) Fallback to JSON if valid
+  if (fs.existsSync(OUTPUT_JSON)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(OUTPUT_JSON, "utf8"));
+      const total = countTotalStudentsSaved(parsed);
+      console.log(`📦 Loaded from JSON | Roll Codes: ${Object.keys(parsed).length} | Students: ${total}`);
+      return parsed;
+    } catch (err) {
+      console.log(`⚠️ JSON load failed: ${err.message}`);
+    }
+  }
+
+  console.log("⚠️ No valid existing data found. Starting with empty object.");
+  return {};
+}
+
+// ===============================
+// SAVE JSON + GZ
+// ===============================
+function formatStudent(student, indent = "    ") {
+  const lines = [];
+  lines.push("{");
+  lines.push(`${indent}"studentName": ${JSON.stringify(student.studentName)},`);
+  lines.push(`${indent}"fatherName": ${JSON.stringify(student.fatherName)},`);
+  lines.push(`${indent}"regNumber": ${JSON.stringify(student.regNumber)},`);
+  lines.push(`${indent}"BSEBUniqueId": ${JSON.stringify(student.BSEBUniqueId)},`);
+  lines.push(`${indent}"schoolName": ${JSON.stringify(student.schoolName)},`);
+  lines.push(`${indent}"rollCode": ${JSON.stringify(student.rollCode)},`);
+  lines.push(`${indent}"rollNo": ${JSON.stringify(student.rollNo)},`);
+  lines.push(`${indent}"stream": ${JSON.stringify(student.stream)},`);
+  lines.push(`${indent}"totalMarks": ${JSON.stringify(student.totalMarks)},`);
+  lines.push(`${indent}"Division": ${JSON.stringify(student.Division)},`);
+  lines.push(`${indent}"subjects": [`);
+
+  const subjectLines = student.subjects.map((sub) => {
+    const ordered = {};
+    ordered.subject = sub.subject;
+    ordered.FMarks = sub.FMarks;
+    ordered.PMarks = sub.PMarks;
+    ordered.theory = sub.theory;
+    if (sub.practical !== undefined) ordered.practical = sub.practical;
+    if (sub.regulationTheory !== undefined) ordered.regulationTheory = sub.regulationTheory;
+    if (sub.regulationPractical !== undefined) ordered.regulationPractical = sub.regulationPractical;
+    ordered.subTotal = sub.subTotal;
+    if (sub.extra !== undefined) ordered.extra = sub.extra;
+
+    return `${indent}  ${JSON.stringify(ordered)}`;
+  });
+
+  lines.push(subjectLines.join(",\n"));
+  lines.push(`${indent}]`);
+  lines.push("}");
+  return lines.join("\n");
+}
+
+function buildCustomJSON(data) {
+  const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
+  const lines = [];
+  lines.push("{");
+
+  rollCodes.forEach((rollCode, idx) => {
+    const students = data[rollCode] || {};
+    const rollNoKeys = Object.keys(students).sort((a, b) => Number(a) - Number(b));
+
+    lines.push(`  ${JSON.stringify(rollCode)}: {`);
+
+    rollNoKeys.forEach((rollNo, i) => {
+      const student = students[rollNo];
+      const formatted = formatStudent(student, "      ")
+        .split("\n")
+        .map((line, index) => (index === 0 ? `    ${JSON.stringify(rollNo)}: ${line}` : `    ${line}`))
+        .join("\n");
+
+      lines.push(formatted + (i < rollNoKeys.length - 1 ? "," : ""));
+    });
+
+    lines.push(`  }${idx < rollCodes.length - 1 ? "," : ""}`);
+  });
+
+  lines.push("}");
+  return lines.join("\n");
+}
+
+function saveBoth(data) {
+  const jsonText = buildCustomJSON(data);
+
+  // safety: don't write empty/broken
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (err) {
+    console.log(`❌ Refusing to save invalid JSON: ${err.message}`);
+    return false;
+  }
+
+  const total = countTotalStudentsSaved(parsed);
+  if (total === 0) {
+    console.log("❌ Refusing to save because total students = 0");
+    return false;
+  }
+
+  fs.writeFileSync(OUTPUT_JSON, jsonText, "utf8");
+  fs.writeFileSync(OUTPUT_GZ, zlib.gzipSync(Buffer.from(jsonText, "utf8")));
+
+  console.log(`💾 Saved JSON + GZ | Students: ${total}`);
+  return true;
+}
+
 function countTotalStudentsSaved(fullResults) {
   let total = 0;
   for (const rollCode of Object.keys(fullResults)) {
     total += Object.keys(fullResults[rollCode] || {}).length;
   }
   return total;
-}
-
-function saveProgress(message) {
-  fs.writeFileSync(PROGRESS_FILE, message, "utf8");
 }
 
 // ===============================
@@ -206,7 +307,6 @@ function parseSubjects($) {
       if (cells[4]) obj.practical = clean(cells[4] || "");
       if (cells[5]) obj.regulationTheory = clean(cells[5] || "");
       if (cells[6]) obj.regulationPractical = clean(cells[6] || "");
-
       if (currentAdditionalSection) obj.extra = currentAdditionalSection;
 
       subjects.push(obj);
@@ -259,7 +359,6 @@ function extractFullResult(html) {
 // ===============================
 async function getSessionData() {
   const res = await client.get(BASE_URL);
-
   const html = res.data;
   const rawCookies = res.headers["set-cookie"] || [];
   const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
@@ -269,10 +368,7 @@ async function getSessionData() {
     throw new Error("Could not fetch RequestVerificationToken");
   }
 
-  return {
-    cookieHeader,
-    requestVerificationToken
-  };
+  return { cookieHeader, requestVerificationToken };
 }
 
 // ===============================
@@ -395,26 +491,18 @@ async function processRollCode(rollCode) {
   if (!saveState.fullResults[rollCode]) saveState.fullResults[rollCode] = {};
 
   const alreadySavedForRollCode = Object.keys(saveState.fullResults[rollCode]).length;
-
   console.log(`▶️ Rechecking ${rollCode} (already saved: ${alreadySavedForRollCode})`);
 
   let newSaved = 0;
   let skippedExisting = 0;
-  let checkedUnsaved = 0;
 
   for (let current = ROLLNO_START; current <= ROLLNO_END; current += BATCH_SIZE) {
     const batchEnd = Math.min(current + BATCH_SIZE - 1, ROLLNO_END);
     const batchRollNos = [];
 
     for (let rn = current; rn <= batchEnd; rn++) {
-      if (saveState.fullResults[rollCode][rn]) {
-        skippedExisting++;
-        continue;
-      }
       batchRollNos.push(rn);
     }
-
-    if (!batchRollNos.length) continue;
 
     for (let i = 0; i < batchRollNos.length; i += CONCURRENCY) {
       const chunk = batchRollNos.slice(i, i + CONCURRENCY);
@@ -426,20 +514,22 @@ async function processRollCode(rollCode) {
       for (let j = 0; j < chunk.length; j++) {
         const rn = chunk[j];
         const result = results[j];
-        checkedUnsaved++;
 
-        if (result.valid) {
-          if (!saveState.fullResults[rollCode][rn]) {
-            saveState.fullResults[rollCode][rn] = result.data;
-            saveState.unsavedValidCount++;
-            saveState.totalStudentsSaved++;
-            newSaved++;
-          }
+        if (!result.valid) continue;
+
+        if (saveState.fullResults[rollCode][rn]) {
+          skippedExisting++;
+          continue;
         }
+
+        saveState.fullResults[rollCode][rn] = result.data;
+        saveState.unsavedValidCount++;
+        saveState.totalStudentsSaved++;
+        newSaved++;
       }
 
-      if (saveState.unsavedValidCount >= SAVE_EVERY_NEW_STUDENTS) {
-        saveGzipJSON(OUTPUT_GZ_FILE, saveState.fullResults);
+      if (saveState.unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
+        saveBoth(saveState.fullResults);
         console.log(`💾 Progress Saved | Total Saved: ${saveState.totalStudentsSaved}`);
         saveState.unsavedValidCount = 0;
       }
@@ -447,8 +537,6 @@ async function processRollCode(rollCode) {
   }
 
   if (newSaved > 0) {
-    saveGzipJSON(OUTPUT_GZ_FILE, saveState.fullResults);
-    saveState.unsavedValidCount = 0;
     console.log(`✅ ${rollCode} | New Saved: ${newSaved} | Already Had: ${alreadySavedForRollCode}`);
   } else {
     console.log(`⚠️ ${rollCode} | No new student | Already Had: ${alreadySavedForRollCode}`);
@@ -473,7 +561,7 @@ async function processRollCode(rollCode) {
     return;
   }
 
-  saveState.fullResults = loadGzipJSON(OUTPUT_GZ_FILE, {});
+  saveState.fullResults = loadMainData();
   saveState.totalStudentsSaved = countTotalStudentsSaved(saveState.fullResults);
   saveState.unsavedValidCount = 0;
 
@@ -481,39 +569,23 @@ async function processRollCode(rollCode) {
   console.log(`📚 Total valid roll codes available: ${allValidRollCodes.length}`);
   console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
   console.log(`📦 Roll codes in this run: ${selectedRollCodes.length}`);
-  console.log(`📦 Already saved students in GZ: ${saveState.totalStudentsSaved}`);
-  console.log(`⚡ Parallel Roll Codes: ${ROLLCODE_PARALLEL}`);
-  console.log(`⚡ RollNo Concurrency per Roll Code: ${CONCURRENCY}`);
-
-  saveProgress(
-    `STARTED\nRange: ${START_INDEX}-${END_INDEX}\nSaved Before: ${saveState.totalStudentsSaved}\nTime: ${new Date().toISOString()}`
-  );
+  console.log(`📦 Already saved students in dataset: ${saveState.totalStudentsSaved}`);
+  console.log(`⚡ Parallel roll codes: ${ROLLCODE_PARALLEL}`);
+  console.log(`⚡ Concurrency per roll code: ${CONCURRENCY}`);
 
   for (let i = 0; i < selectedRollCodes.length; i += ROLLCODE_PARALLEL) {
     const rollCodeChunk = selectedRollCodes.slice(i, i + ROLLCODE_PARALLEL);
 
-    console.log(`🚀 Roll code group: ${rollCodeChunk.join(", ")}`);
+    console.log(`\n🚀 Roll code group: ${rollCodeChunk.join(", ")}`);
 
     await Promise.all(
       rollCodeChunk.map(rollCode => processRollCode(rollCode))
     );
 
-    saveGzipJSON(OUTPUT_GZ_FILE, saveState.fullResults);
-
-    console.log(
-      `💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | Total Saved: ${saveState.totalStudentsSaved}`
-    );
-
-    saveProgress(
-      `RUNNING\nRange: ${START_INDEX}-${END_INDEX}\nCompleted: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length}\nTotal Saved: ${saveState.totalStudentsSaved}\nTime: ${new Date().toISOString()}`
-    );
+    saveBoth(saveState.fullResults);
+    console.log(`💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | Total Saved: ${saveState.totalStudentsSaved}`);
   }
 
-  saveGzipJSON(OUTPUT_GZ_FILE, saveState.fullResults);
-
-  console.log(`🎉 FULL RECHECK COMPLETED | Range ${START_INDEX}-${END_INDEX} | Total Saved: ${saveState.totalStudentsSaved}`);
-
-  saveProgress(
-    `DONE\nRange: ${START_INDEX}-${END_INDEX}\nFinal Saved: ${saveState.totalStudentsSaved}\nTime: ${new Date().toISOString()}`
-  );
+  saveBoth(saveState.fullResults);
+  console.log(`\n🎉 RECHECK COMPLETED | Range ${START_INDEX}-${END_INDEX} | Final Total Saved: ${saveState.totalStudentsSaved}`);
 })();
