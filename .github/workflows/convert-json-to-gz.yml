@@ -1,4 +1,4 @@
-name: BSEB Full Recheck
+name: BSEB Full Recheck Tempo
 
 on:
   workflow_dispatch:
