@@ -1,4 +1,4 @@
-name: BSEB Full Audit Recheck
+name: BSEB Full Result Recheck
 
 on:
   workflow_dispatch:
@@ -16,8 +16,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true
-          fetch-depth: 0
-          lfs: true
+          lfs: false
+          fetch-depth: 1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -27,35 +27,43 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Run Audit Script
+      - name: Decompress Main JSON
+        run: |
+          if [ -f bseb-12th-full-result-2026.json.gz ]; then
+            echo "📦 Extracting main JSON..."
+            gunzip -c bseb-12th-full-result-2026.json.gz > bseb-12th-full-result-2026.json
+            echo "✅ JSON extracted"
+          else
+            echo "{}" > bseb-12th-full-result-2026.json
+            echo "⚠️ No compressed JSON found. Created empty JSON."
+          fi
+
+      - name: Run Script
         run: node script.js
+
+      - name: Recompress Main JSON
+        if: always()
+        run: |
+          if [ -f bseb-12th-full-result-2026.json ]; then
+            echo "📦 Compressing updated JSON..."
+            gzip -c bseb-12th-full-result-2026.json > bseb-12th-full-result-2026.json.gz
+            echo "✅ JSON compressed"
+          fi
 
       - name: Show Saved Files
         if: always()
         run: |
           echo "===== ROOT FILES ====="
           ls -lah
-
           echo ""
-          echo "===== JSON FILE SIZE ====="
-          du -h bseb-12th-full-result-2026.json || echo "JSON file not found"
-
+          echo "===== RAW JSON SIZE ====="
+          du -sh bseb-12th-full-result-2026.json || echo "Raw JSON not found"
+          echo ""
+          echo "===== COMPRESSED JSON SIZE ====="
+          du -sh bseb-12th-full-result-2026.json.gz || echo "Compressed JSON not found"
           echo ""
           echo "===== PROGRESS FILE ====="
           cat progress.txt || echo "Progress file not found"
-
-          echo ""
-          echo "===== JSON START ====="
-          head -n 30 bseb-12th-full-result-2026.json || echo "JSON file not found"
-
-          echo ""
-          echo "===== JSON END ====="
-          tail -n 30 bseb-12th-full-result-2026.json || echo "JSON file not found"
-
-      - name: Validate JSON Before Commit
-        if: always()
-        run: |
-          node -e "JSON.parse(require('fs').readFileSync('bseb-12th-full-result-2026.json','utf8')); console.log('✅ JSON VALID')"
 
       - name: Commit and Push Results
         if: always()
@@ -63,19 +71,18 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add bseb-12th-full-result-2026.json progress.txt script.js package.json package-lock.json
+          git add bseb-12th-full-result-2026.json.gz progress.txt .gitattributes
+          git commit -m "Update BSEB full result data" || echo "No changes to commit"
 
-          git diff --cached --quiet && echo "No changes to commit" || git commit -m "Audit update BSEB full result data"
-
-          git fetch origin main
           git pull --rebase origin main || true
-          git push origin main
+          git push
 
-      - name: Upload Result Files
+      - name: Upload Debug Files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseb-audit-result-data
+          name: bseb-full-result-data
           path: |
             bseb-12th-full-result-2026.json
+            bseb-12th-full-result-2026.json.gz
             progress.txt
