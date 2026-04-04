@@ -17,9 +17,9 @@ const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
 // SPEED
-const ROLLCODE_PARALLEL = 100;
-const CONCURRENCY = 1000;
-const BATCH_SIZE = 200;
+const ROLLCODE_PARALLEL = 20;
+const CONCURRENCY = 100;
+const BATCH_SIZE = 100;
 const REQUEST_TIMEOUT = 7000;
 
 // SAVE
@@ -28,7 +28,7 @@ const SAVE_EVERY_VALID_RESULTS = 100;
 // ===============================
 // SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
-const START_INDEX = 6000;
+const START_INDEX = 6100;
 const END_INDEX = 6200;
 
 // ===============================
