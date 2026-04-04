@@ -206,20 +206,20 @@ jobs:
           echo "===== PROGRESS ====="
           cat progress.txt || true
 
-      - name: Commit and Push GZ + Progress
+      - name: Commit and Push Results
         if: always()
         run: |
-          set -e
-
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          rm -f bseb-12th-full-result-2026.json
+          [ -f bseb-12th-full-result-2026.json ] && git add bseb-12th-full-result-2026.json
+          [ -f bseb-12th-full-result-2026.json.gz ] && git add bseb-12th-full-result-2026.json.gz
+          [ -f progress.txt ] && git add progress.txt
+          [ -f script.js ] && git add script.js
 
-          git add bseb-12th-full-result-2026.json.gz progress.txt script.js .github/workflows/recheck.yml
           git status
 
-          git commit -m "Update BSEB recheck progress" || echo "No changes to commit"
+          git commit -m "Update BSEB recheck data" || echo "No changes to commit"
           git pull --rebase origin main || true
           git push
 
