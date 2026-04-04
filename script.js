@@ -11,29 +11,25 @@ const POST_URL = "https://interbiharboard.com/Result/GetResult";
 const SHOW_RESULT_URL = "https://interbiharboard.com/Result/ShowResult";
 
 const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
-
-// MAIN DATA FILES
+const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
 const GZ_FILE = "bseb-12th-full-result-2026.json.gz";
-const TEMP_JSON_FILE = "bseb-12th-full-result-2026.json";
+const PROGRESS_FILE = "progress.txt";
 
-// Roll number range
+// Roll number range per roll code
 const ROLLNO_START = 26010001;
 const ROLLNO_END = 26010999;
 
-// SPEED
-const ROLLCODE_PARALLEL = 25;   // increase carefully
-const CONCURRENCY = 120;        // per roll code
-const BATCH_SIZE = 120;
-const REQUEST_TIMEOUT = 8000;
-
-// SAVE
-const SAVE_EVERY_VALID_RESULTS = 100;
-
 // ===============================
-// SPLIT RANGE
+// FINAL RECHECK SETTINGS
 // ===============================
 const START_INDEX = 6000;
-const END_INDEX = 6001;
+const END_INDEX = 6200;
+
+const ROLLCODE_PARALLEL = 200;
+const CONCURRENCY = 1000;
+const BATCH_SIZE = 100;
+const REQUEST_TIMEOUT = 8000;
+const SAVE_EVERY_VALID_RESULTS = 100;
 
 // ===============================
 // AXIOS CLIENT
@@ -64,6 +60,19 @@ function clean(txt) {
 
 function generateCaptcha() {
   return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function loadJSON(file, fallback = {}) {
+  if (!fs.existsSync(file)) return fallback;
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function saveProgress(text) {
+  fs.writeFileSync(PROGRESS_FILE, text, "utf8");
 }
 
 function detectAdditionalSection(text) {
@@ -105,78 +114,31 @@ function mergeCookies(oldCookieHeader, newSetCookies = []) {
     .join("; ");
 }
 
-// ===============================
-// SAFE LOADERS
-// ===============================
-function loadJSONSafe(file, fallback = {}) {
-  if (!fs.existsSync(file)) return fallback;
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-
 function loadMainData() {
-  // 1) Try real .gz
+  if (fs.existsSync(OUTPUT_FILE)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(OUTPUT_FILE, "utf8"));
+      console.log("✅ Loaded fallback JSON data");
+      return data;
+    } catch {
+      console.log("⚠️ JSON exists but invalid");
+    }
+  }
+
   if (fs.existsSync(GZ_FILE)) {
     try {
-      const raw = fs.readFileSync(GZ_FILE);
-
-      // Check gzip magic bytes
-      if (raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b) {
-        const unzipped = zlib.gunzipSync(raw).toString("utf8");
-        const parsed = JSON.parse(unzipped);
-        console.log(`✅ Loaded real GZ data`);
-        return parsed;
-      }
-
-      // If not real gzip, maybe plain JSON saved with .gz extension
-      try {
-        const asText = raw.toString("utf8");
-        const parsed = JSON.parse(asText);
-        console.log(`⚠️ GZ file was actually plain JSON. Loaded safely.`);
-        return parsed;
-      } catch {}
-
-      console.log(`❌ GZ exists but is invalid`);
-    } catch (err) {
-      console.log(`❌ GZ load failed: ${err.message}`);
+      const gzBuffer = fs.readFileSync(GZ_FILE);
+      const jsonBuffer = zlib.gunzipSync(gzBuffer);
+      const data = JSON.parse(jsonBuffer.toString("utf8"));
+      console.log("✅ Loaded GZ data");
+      return data;
+    } catch (e) {
+      console.log("⚠️ GZ exists but is invalid");
     }
   }
 
-  // 2) Try temp json fallback
-  if (fs.existsSync(TEMP_JSON_FILE)) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(TEMP_JSON_FILE, "utf8"));
-      console.log(`✅ Loaded fallback JSON data`);
-      return parsed;
-    } catch (err) {
-      console.log(`❌ JSON fallback invalid: ${err.message}`);
-    }
-  }
-
-  console.log(`⚠️ No valid previous data found. Script will still run, but be careful.`);
+  console.log("⚠️ No valid previous data found. Starting empty.");
   return {};
-}
-
-function saveCompressedJSON(data) {
-  const jsonString = buildCustomJSONString(data);
-
-  // Save temp json first (safety)
-  fs.writeFileSync(TEMP_JSON_FILE, jsonString, "utf8");
-
-  // Save real gzip
-  const gz = zlib.gzipSync(Buffer.from(jsonString, "utf8"), { level: 9 });
-  fs.writeFileSync(GZ_FILE, gz);
-
-  // Validate immediately
-  try {
-    const test = zlib.gunzipSync(fs.readFileSync(GZ_FILE)).toString("utf8");
-    JSON.parse(test);
-  } catch (err) {
-    throw new Error(`GZ validation failed after save: ${err.message}`);
-  }
 }
 
 // ===============================
@@ -218,7 +180,7 @@ function formatStudent(student, indent = "    ") {
   return lines.join("\n");
 }
 
-function buildCustomJSONString(data) {
+function saveCustomJSON(file, data) {
   const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
   const lines = [];
   lines.push("{");
@@ -243,7 +205,7 @@ function buildCustomJSONString(data) {
   });
 
   lines.push("}");
-  return lines.join("\n");
+  fs.writeFileSync(file, lines.join("\n"), "utf8");
 }
 
 function countTotalStudentsSaved(fullResults) {
@@ -275,7 +237,6 @@ function parseSubjects($) {
     $(rows[1]).find("td,th").each((_, cell) => row2.push(clean($(cell).text())));
 
     const row1Text = row1.join(" ").toLowerCase();
-
     const isMarksTable =
       row1Text.includes("subject") &&
       row1Text.includes("full marks") &&
@@ -367,6 +328,7 @@ function extractFullResult(html) {
 // ===============================
 async function getSessionData() {
   const res = await client.get(BASE_URL);
+
   const html = res.data;
   const rawCookies = res.headers["set-cookie"] || [];
   const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
@@ -376,7 +338,10 @@ async function getSessionData() {
     throw new Error("Could not fetch RequestVerificationToken");
   }
 
-  return { cookieHeader, requestVerificationToken };
+  return {
+    cookieHeader,
+    requestVerificationToken
+  };
 }
 
 // ===============================
@@ -477,7 +442,7 @@ async function fetchStudentResult(rollCode, rollNo) {
 // LOAD VALID ROLL CODES
 // ===============================
 function loadValidRollCodes() {
-  const raw = loadJSONSafe(VALID_ROLL_CODE_FILE, {});
+  const raw = loadJSON(VALID_ROLL_CODE_FILE, {});
   return Object.keys(raw)
     .filter(code => /^\d+$/.test(code))
     .sort((a, b) => Number(a) - Number(b));
@@ -493,22 +458,24 @@ const saveState = {
 };
 
 // ===============================
-// PROCESS ONE ROLL CODE (FULL RECHECK)
+// PROCESS ONE ROLL CODE
 // ===============================
 async function processRollCode(rollCode) {
   if (!saveState.fullResults[rollCode]) saveState.fullResults[rollCode] = {};
 
   const alreadySavedForRollCode = Object.keys(saveState.fullResults[rollCode]).length;
-  let newSaved = 0;
+  let savedInThisRollCode = 0;
   let skippedExisting = 0;
 
   console.log(`▶️ Rechecking ${rollCode} (already saved: ${alreadySavedForRollCode})`);
 
-  for (let current = ROLLNO_START; current <= ROLLNO_END; current += BATCH_SIZE) {
-    const batchEnd = Math.min(current + BATCH_SIZE - 1, ROLLNO_END);
+  let currentRollNo = ROLLNO_START;
+
+  while (currentRollNo <= ROLLNO_END) {
+    const batchEnd = Math.min(currentRollNo + BATCH_SIZE - 1, ROLLNO_END);
     const batchRollNos = [];
 
-    for (let rn = current; rn <= batchEnd; rn++) {
+    for (let rn = currentRollNo; rn <= batchEnd; rn++) {
       batchRollNos.push(rn);
     }
 
@@ -523,29 +490,30 @@ async function processRollCode(rollCode) {
         const rn = chunk[j];
         const result = results[j];
 
-        if (!result.valid) continue;
-
-        if (saveState.fullResults[rollCode][rn]) {
-          skippedExisting++;
-          continue;
+        if (result.valid) {
+          if (!saveState.fullResults[rollCode][rn]) {
+            saveState.fullResults[rollCode][rn] = result.data;
+            saveState.unsavedValidCount++;
+            saveState.totalStudentsSaved++;
+            savedInThisRollCode++;
+          } else {
+            skippedExisting++;
+          }
         }
-
-        saveState.fullResults[rollCode][rn] = result.data;
-        saveState.totalStudentsSaved++;
-        saveState.unsavedValidCount++;
-        newSaved++;
       }
 
       if (saveState.unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
-        saveCompressedJSON(saveState.fullResults);
+        saveCustomJSON(OUTPUT_FILE, saveState.fullResults);
         console.log(`💾 Progress Saved | Total Saved: ${saveState.totalStudentsSaved}`);
         saveState.unsavedValidCount = 0;
       }
     }
+
+    currentRollNo = batchEnd + 1;
   }
 
-  if (newSaved > 0) {
-    console.log(`✅ ${rollCode} | New Saved: ${newSaved} | Already Had: ${alreadySavedForRollCode}`);
+  if (savedInThisRollCode > 0) {
+    console.log(`✅ ${rollCode} | New Saved: ${savedInThisRollCode} | Already Had: ${alreadySavedForRollCode}`);
   } else {
     console.log(`⚠️ ${rollCode} | No new student | Already Had: ${alreadySavedForRollCode}`);
   }
@@ -586,16 +554,20 @@ async function processRollCode(rollCode) {
 
     console.log(`\n🚀 Roll code group: ${rollCodeChunk.join(", ")}`);
 
-    await Promise.all(rollCodeChunk.map(rollCode => processRollCode(rollCode)));
-
-    saveCompressedJSON(saveState.fullResults);
-
-    console.log(
-      `💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | Total Saved: ${saveState.totalStudentsSaved}`
+    await Promise.all(
+      rollCodeChunk.map(rollCode => processRollCode(rollCode))
     );
+
+    saveCustomJSON(OUTPUT_FILE, saveState.fullResults);
+
+    saveProgress(
+      `Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length}\nTotal Saved: ${saveState.totalStudentsSaved}\nLast Run Range: ${START_INDEX}-${END_INDEX}\n`
+    );
+
+    console.log(`💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | Total Saved: ${saveState.totalStudentsSaved}`);
   }
 
-  saveCompressedJSON(saveState.fullResults);
+  saveCustomJSON(OUTPUT_FILE, saveState.fullResults);
 
   console.log(`\n🎉 FULL RECHECK COMPLETED`);
   console.log(`📦 Final Total Saved: ${saveState.totalStudentsSaved}`);
