@@ -1,4 +1,4 @@
-name: BSEB Full Recheck GZ
+name: BSEB Full Recheck
 
 on:
   workflow_dispatch:
@@ -12,11 +12,11 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout Repo WITHOUT LFS
+      - name: Checkout Repo
         uses: actions/checkout@v4
         with:
-          lfs: false
           persist-credentials: true
+          lfs: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -26,103 +26,103 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Show Existing Files
+      - name: Show Existing Files Before Run
         run: |
           echo "===== ROOT FILES ====="
           ls -lh
-          echo
-          echo "===== GZ FILE ====="
-          ls -lh bseb-12th-full-result-2026.json.gz || echo "No GZ file found"
-          echo
-          echo "===== PROGRESS FILE ====="
-          cat progress.txt || echo "No progress file yet"
+          echo "===== JSON ====="
+          ls -lh bseb-12th-full-result-2026.json || true
+          echo "===== GZ ====="
+          ls -lh bseb-12th-full-result-2026.json.gz || true
 
-      - name: Validate GZ Before Run
+      - name: Validate Existing Data
         run: |
           node - <<'EOF'
           const fs = require("fs");
           const zlib = require("zlib");
 
-          const file = "bseb-12th-full-result-2026.json.gz";
+          const jsonFile = "bseb-12th-full-result-2026.json";
+          const gzFile = "bseb-12th-full-result-2026.json.gz";
 
-          if (!fs.existsSync(file)) {
-            console.error("❌ GZ file not found");
-            process.exit(1);
+          let ok = false;
+
+          if (fs.existsSync(gzFile)) {
+            try {
+              const raw = fs.readFileSync(gzFile);
+              const txt = zlib.gunzipSync(raw).toString("utf8");
+              const data = JSON.parse(txt);
+              let total = 0;
+              for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
+              console.log(`✅ GZ valid | Roll Codes: ${Object.keys(data).length} | Students: ${total}`);
+              ok = true;
+            } catch (e) {
+              console.log(`⚠️ GZ invalid: ${e.message}`);
+            }
           }
 
-          try {
-            const text = zlib.gunzipSync(fs.readFileSync(file)).toString("utf8");
-            const data = JSON.parse(text);
-
-            let total = 0;
-            for (const rc of Object.keys(data)) {
-              total += Object.keys(data[rc] || {}).length;
+          if (!ok && fs.existsSync(jsonFile)) {
+            try {
+              const data = JSON.parse(fs.readFileSync(jsonFile, "utf8"));
+              let total = 0;
+              for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
+              console.log(`✅ JSON valid | Roll Codes: ${Object.keys(data).length} | Students: ${total}`);
+              ok = true;
+            } catch (e) {
+              console.log(`⚠️ JSON invalid: ${e.message}`);
             }
+          }
 
-            console.log("✅ GZ VALID BEFORE RUN");
-            console.log("📚 Roll Codes:", Object.keys(data).length);
-            console.log("🎓 Students:", total);
-          } catch (e) {
-            console.error("❌ GZ validation failed:", e.message);
-            process.exit(1);
+          if (!ok) {
+            console.log("⚠️ No valid previous data found. Script will still run, but be careful.");
           }
           EOF
 
       - name: Run Recheck Script
         run: node script.js
 
-      - name: Validate GZ After Run
+      - name: Verify Output After Run
         if: always()
         run: |
+          echo "===== OUTPUT FILES ====="
+          ls -lh bseb-12th-full-result-2026.json* || true
+
           node - <<'EOF'
           const fs = require("fs");
           const zlib = require("zlib");
 
-          const file = "bseb-12th-full-result-2026.json.gz";
+          const gzFile = "bseb-12th-full-result-2026.json.gz";
 
-          if (!fs.existsSync(file)) {
-            console.error("❌ GZ file missing after run");
+          if (!fs.existsSync(gzFile)) {
+            console.log("❌ GZ file missing after run");
             process.exit(1);
           }
 
-          try {
-            const text = zlib.gunzipSync(fs.readFileSync(file)).toString("utf8");
-            const data = JSON.parse(text);
+          const raw = fs.readFileSync(gzFile);
+          const txt = zlib.gunzipSync(raw).toString("utf8");
+          const data = JSON.parse(txt);
 
-            let total = 0;
-            for (const rc of Object.keys(data)) {
-              total += Object.keys(data[rc] || {}).length;
-            }
+          let total = 0;
+          for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
 
-            console.log("✅ GZ VALID AFTER RUN");
-            console.log("📚 Roll Codes:", Object.keys(data).length);
-            console.log("🎓 Students:", total);
-          } catch (e) {
-            console.error("❌ GZ validation failed after run:", e.message);
+          console.log(`✅ Final GZ valid | Roll Codes: ${Object.keys(data).length} | Students: ${total}`);
+
+          if (total === 0) {
+            console.log("❌ Refusing empty dataset");
             process.exit(1);
           }
           EOF
 
-      - name: Show Final Files
-        if: always()
-        run: |
-          echo "===== FINAL FILES ====="
-          ls -lh
-          echo
-          echo "===== GZ FILE SIZE ====="
-          ls -lh bseb-12th-full-result-2026.json.gz || true
-          echo
-          echo "===== PROGRESS ====="
-          cat progress.txt || true
-
-      - name: Commit and Push Updated GZ
+      - name: Commit and Push Results
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add bseb-12th-full-result-2026.json.gz progress.txt
-          git commit -m "Update BSEB recheck data (gz)" || echo "No changes to commit"
+          git add script.js
+          git add bseb-12th-full-result-2026.json
+          git add bseb-12th-full-result-2026.json.gz
+
+          git commit -m "Recheck BSEB full result data" || echo "No changes to commit"
           git pull --rebase origin main || true
           git push
 
@@ -130,7 +130,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseb-recheck-gz-backup
+          name: bseb-recheck-backup
           path: |
+            bseb-12th-full-result-2026.json
             bseb-12th-full-result-2026.json.gz
-            progress.txt
