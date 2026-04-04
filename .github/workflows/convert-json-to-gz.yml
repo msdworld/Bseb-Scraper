@@ -1,46 +1,58 @@
-name: Inspect Current GZ Data
+name: Safe Convert JSON To GZ
 
 on:
   workflow_dispatch:
 
 jobs:
-  inspect:
+  convert:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
     steps:
-      - name: Checkout Repo
+      - name: Checkout Repo with LFS
         uses: actions/checkout@v4
         with:
-          lfs: false
+          lfs: true
+          persist-credentials: true
 
-      - name: Restore JSON from GZ
+      - name: Show Initial Files
         run: |
-          if [ ! -f bseb-12th-full-result-2026.json.gz ]; then
-            echo "❌ GZ file not found"
-            exit 1
-          fi
+          echo "===== ROOT FILES ====="
+          ls -lah
 
-          gunzip -c bseb-12th-full-result-2026.json.gz > bseb-12th-full-result-2026.json
+          echo "===== JSON FILE SIZE ====="
+          ls -lh bseb-12th-full-result-2026.json || true
 
-      - name: Inspect JSON
-        run: |
-          echo "===== FILE SIZES ====="
-          ls -lh bseb-12th-full-result-2026.json.gz
-          ls -lh bseb-12th-full-result-2026.json
+          echo "===== JSON START ====="
+          head -n 5 bseb-12th-full-result-2026.json || true
 
-          echo "===== FIRST 20 LINES ====="
-          head -n 20 bseb-12th-full-result-2026.json || true
-
-          echo "===== LAST 20 LINES ====="
-          tail -n 20 bseb-12th-full-result-2026.json || true
-
-      - name: Count Roll Codes and Students
+      - name: Verify JSON Is Real and Count Data
         run: |
           node - <<'EOF'
           const fs = require('fs');
 
           const file = 'bseb-12th-full-result-2026.json';
-          const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (!fs.existsSync(file)) {
+            console.error('❌ JSON file not found');
+            process.exit(1);
+          }
+
+          const txt = fs.readFileSync(file, 'utf8');
+
+          if (txt.startsWith('version https://git-lfs.github.com/spec/v1')) {
+            console.error('❌ This is only an LFS pointer, not real JSON');
+            process.exit(1);
+          }
+
+          let data;
+          try {
+            data = JSON.parse(txt);
+          } catch (e) {
+            console.error('❌ JSON parse failed:', e.message);
+            process.exit(1);
+          }
 
           const rollCodes = Object.keys(data);
           let totalStudents = 0;
@@ -49,18 +61,89 @@ jobs:
             totalStudents += Object.keys(data[rc] || {}).length;
           }
 
-          console.log("===== DATA SUMMARY =====");
+          console.log("===== VERIFIED SOURCE DATA =====");
           console.log("Total Roll Codes:", rollCodes.length);
           console.log("Total Students:", totalStudents);
 
-          console.log("\n===== FIRST 10 ROLL CODES =====");
-          console.log(rollCodes.slice(0, 10));
-
-          console.log("\n===== LAST 10 ROLL CODES =====");
-          console.log(rollCodes.slice(-10));
-
-          console.log("\n===== SAMPLE COUNTS =====");
-          for (const rc of rollCodes.slice(0, 20)) {
-            console.log(rc, "=>", Object.keys(data[rc] || {}).length);
+          if (totalStudents < 100000) {
+            console.error('❌ Too few students. Refusing conversion.');
+            process.exit(1);
           }
+
+          console.log('✅ Source JSON looks real and large enough');
           EOF
+
+      - name: Convert JSON to GZ
+        run: |
+          gzip -c bseb-12th-full-result-2026.json > bseb-12th-full-result-2026.json.gz
+
+          echo "===== GZ FILE SIZE ====="
+          ls -lh bseb-12th-full-result-2026.json.gz
+
+      - name: Verify GZ Data
+        run: |
+          gunzip -c bseb-12th-full-result-2026.json.gz > verify.json
+
+          node - <<'EOF'
+          const fs = require('fs');
+
+          const file = 'verify.json';
+          const txt = fs.readFileSync(file, 'utf8');
+
+          let data;
+          try {
+            data = JSON.parse(txt);
+          } catch (e) {
+            console.error('❌ GZ verification JSON parse failed:', e.message);
+            process.exit(1);
+          }
+
+          const rollCodes = Object.keys(data);
+          let totalStudents = 0;
+
+          for (const rc of rollCodes) {
+            totalStudents += Object.keys(data[rc] || {}).length;
+          }
+
+          console.log("===== VERIFIED GZ DATA =====");
+          console.log("Total Roll Codes:", rollCodes.length);
+          console.log("Total Students:", totalStudents);
+
+          if (totalStudents < 100000) {
+            console.error('❌ GZ verified student count too low. Refusing deletion.');
+            process.exit(1);
+          }
+
+          console.log('✅ GZ verification successful');
+          EOF
+
+      - name: Remove Old JSON Only After Verification
+        run: |
+          rm -f verify.json
+          git rm -f bseb-12th-full-result-2026.json
+
+      - name: Remove LFS Tracking For JSON
+        run: |
+          if [ -f .gitattributes ]; then
+            sed -i '/bseb-12th-full-result-2026\.json/d' .gitattributes
+          fi
+
+          echo "===== .gitattributes ====="
+          cat .gitattributes || true
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add bseb-12th-full-result-2026.json.gz .gitattributes
+          git commit -m "Safely convert full result JSON to gzip" || echo "No changes to commit"
+          git pull --rebase origin main || true
+          git push
+
+      - name: Upload Artifact Backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseb-full-result-gz-backup
+          path: |
+            bseb-12th-full-result-2026.json.gz
