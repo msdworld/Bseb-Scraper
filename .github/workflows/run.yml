@@ -11,26 +11,11 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout Repo (NO LFS)
+      - name: Checkout Repo
         uses: actions/checkout@v4
         with:
           persist-credentials: true
           lfs: false
-          fetch-depth: 1
-
-      - name: Disable Git LFS in runner
-        run: |
-          git lfs uninstall || true
-          git config --global filter.lfs.required false
-          git config --global filter.lfs.smudge "cat"
-          git config --global filter.lfs.process ""
-
-      - name: Show repo files before run
-        run: |
-          echo "===== ROOT FILES ====="
-          ls -lh
-          echo "===== GIT ATTRIBUTES ====="
-          cat .gitattributes || echo "No .gitattributes found"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,24 +25,49 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
+      - name: Restore JSON from GZ
+        run: |
+          if [ -f bseb-12th-full-result-2026.json.gz ]; then
+            echo "📦 Found compressed master file"
+            gunzip -c bseb-12th-full-result-2026.json.gz > bseb-12th-full-result-2026.json
+            echo "✅ JSON restored from GZ"
+          else
+            echo "{}" > bseb-12th-full-result-2026.json
+            echo "⚠️ No GZ found, created empty JSON"
+          fi
+
+          echo "===== JSON FILE SIZE ====="
+          ls -lh bseb-12th-full-result-2026.json
+
+          echo "===== JSON START ====="
+          head -n 10 bseb-12th-full-result-2026.json || true
+
       - name: Run Script
         run: node script.js
 
-      - name: Show saved files after run
+      - name: Compress JSON back to GZ
         if: always()
         run: |
-          echo "===== ROOT FILES AFTER RUN ====="
-          ls -lh
-          echo "===== JSON FILE SIZE ====="
-          du -h bseb-12th-full-result-2026.json || echo "JSON file not found"
-          echo "===== PROGRESS FILE ====="
-          cat progress.txt || echo "No progress file"
+          if [ -f bseb-12th-full-result-2026.json ]; then
+            gzip -c bseb-12th-full-result-2026.json > bseb-12th-full-result-2026.json.gz
+            echo "✅ JSON compressed back to GZ"
+          fi
 
-      - name: Clean unwanted files before commit
+      - name: Show Saved Files
         if: always()
         run: |
-          rm -rf node_modules
-          rm -f package-lock.json
+          echo "===== FILE LIST ====="
+          ls -lah
+
+          echo "===== GZ FILE SIZE ====="
+          ls -lh bseb-12th-full-result-2026.json.gz || true
+
+          echo "===== PROGRESS FILE ====="
+          cat progress.txt || echo "Progress file not found"
+
+      - name: Cleanup JSON
+        if: always()
+        run: rm -f bseb-12th-full-result-2026.json
 
       - name: Commit and Push Results
         if: always()
@@ -65,11 +75,8 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add bseb-12th-full-result-2026.json progress.txt script.js .github/workflows/*.yml
-          git status
-
-          git commit -m "Update BSEB full result recheck data" || echo "No changes to commit"
-
+          git add bseb-12th-full-result-2026.json.gz progress.txt
+          git commit -m "Update BSEB full result data" || echo "No changes to commit"
           git pull --rebase origin main || true
           git push
 
@@ -79,5 +86,5 @@ jobs:
         with:
           name: bseb-full-result-data
           path: |
-            bseb-12th-full-result-2026.json
+            bseb-12th-full-result-2026.json.gz
             progress.txt
