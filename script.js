@@ -13,8 +13,8 @@ const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
 
 // Roll number range per roll code
-const ROLLNO_START = 26010001;
-const ROLLNO_END = 26010999;
+const ROLLNO_START = 26020001;
+const ROLLNO_END = 26020999;
 
 // SPEED
 const ROLLCODE_PARALLEL = 20;
