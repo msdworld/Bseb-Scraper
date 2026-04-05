@@ -8,7 +8,7 @@ const API_URL = "https://resultapi.biharboardonline.org/result";
 
 // TEST VALUES
 const TEST_ROLL_CODE = "92006";
-const TEST_ROLL_NO = "2600001";
+const TEST_ROLL_NO = "2600120";
 
 const OUTPUT_FILE = "BSEB 10TH Result/test-result-2026-10th.json";
 
