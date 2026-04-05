@@ -5,249 +5,184 @@ const fs = require("fs");
 // CONFIG
 // ===============================
 const API_URL = "https://resultapi.biharboardonline.org/result";
+const OUTPUT_FILE = "bseb-10th-school-list-2026.json";
 
-// TEST VALUES
-const TEST_ROLL_CODE = "22050";
-const TEST_ROLL_NO = "2600046";
+const ROLLCODE_START = 10000;
+const ROLLCODE_END = 99999;
 
-const OUTPUT_FILE = "BSEB 10TH Result/test-result-2026-10th.json";
+const IMPORTANT_ROLLNOS = [
+  2600007,
+  2600019,
+  2600026,
+  2600037,
+  2600059,
+  2600081,
+  2600108,
+  2600137,
+  2600071,
+  2600044
+];
+
+// SPEED
+const ROLLCODE_PARALLEL = 200; // roll codes together
+const REQUEST_TIMEOUT = 6000;
+
+// SAVE
+const SAVE_EVERY_NEW = 50;
 
 // ===============================
-// AXIOS CLIENT
+// AXIOS
 // ===============================
 const client = axios.create({
-  timeout: 10000,
+  timeout: REQUEST_TIMEOUT,
   headers: {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
-    "Origin": "https://result.biharboardonline.org",
-    "Referer": "https://result.biharboardonline.org/"
+    "Referer": "https://result.biharboardonline.org/",
+    "Origin": "https://result.biharboardonline.org"
   }
 });
 
 // ===============================
 // HELPERS
 // ===============================
-function clean(value) {
-  if (value === null || value === undefined) return "";
-  return String(value).trim();
+function clean(txt) {
+  return (txt || "").toString().replace(/\s+/g, " ").trim();
 }
 
-function stripLeadingZeros(value) {
-  const v = clean(value);
-  if (!v) return "";
-
-  if (/^\d+$/.test(v)) {
-    return String(Number(v));
-  }
-
-  return v;
-}
-
-function onlyIfValue(obj, key, value) {
-  if (
-    value !== null &&
-    value !== undefined &&
-    value !== "" &&
-    value !== false
-  ) {
-    obj[key] = value;
+function loadJSON(file, fallback = {}) {
+  if (!fs.existsSync(file)) return fallback;
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
   }
 }
 
-function buildPractical(subject) {
-  const projectWork = stripLeadingZeros(subject.project_work);
-  const literacyActivity = stripLeadingZeros(subject.literacy_activity);
-  const iaSci = stripLeadingZeros(subject.ia_sci);
-  const practical = stripLeadingZeros(subject.practical);
+function saveJSON(file, data) {
+  const ordered = {};
+  Object.keys(data)
+    .sort((a, b) => Number(a) - Number(b))
+    .forEach(k => {
+      ordered[k] = data[k];
+    });
 
-  // SOCIAL SCIENCE => 10+9
-  if (projectWork && literacyActivity) {
-    return `${projectWork}+${literacyActivity}`;
-  }
-
-  // SCIENCE => ia_sci becomes practical
-  if (iaSci) {
-    return iaSci;
-  }
-
-  // fallback if actual practical exists
-  if (practical) {
-    return practical;
-  }
-
-  return "";
+  fs.writeFileSync(file, JSON.stringify(ordered, null, 2), "utf8");
 }
 
 // ===============================
-// SUBJECT FORMAT
-// ===============================
-function formatSubjects(subjects = []) {
-  return subjects.map((sub) => {
-    const formatted = {
-      subCode: clean(sub.sub_code),
-      subject: clean(sub.sub_name),
-      theory: stripLeadingZeros(sub.theory),
-      subGroupId: clean(sub.sub_group_id),
-      subTotal: stripLeadingZeros(sub.sub_total)
-    };
-
-    const practical = buildPractical(sub);
-    if (practical) formatted.practical = practical;
-
-    if (clean(sub.sub_result)) {
-      formatted.subResult = clean(sub.sub_result);
-    }
-
-    if (clean(sub.regulation)) {
-      formatted.regulation = clean(sub.regulation);
-    }
-
-    if (clean(sub.cce)) {
-      formatted.cce = clean(sub.cce);
-    }
-
-    if (clean(sub.is_compartmental)) {
-      formatted.isCompartmental = clean(sub.is_compartmental);
-    }
-
-    if (clean(sub.is_improved_sub)) {
-      formatted.isImprovedSub = clean(sub.is_improved_sub);
-    }
-
-    return formatted;
-  });
-}
-
-// ===============================
-// FULL RESULT FORMAT
-// ===============================
-function formatResult(raw) {
-  const student = {
-    studentName: clean(raw.name),
-    fatherName: clean(raw.father_name),
-    regNumber: clean(raw.reg_no),
-    BSEBUniqueId: clean(raw.bseb_id),
-    schoolName: clean(raw.school_name),
-    rollCode: clean(raw.roll_code),
-    rollNo: clean(raw.roll_no),
-    examType: clean(raw.exam_type),
-    totalMarks: stripLeadingZeros(raw.total),
-    division: clean(raw.division),
-    subjects: formatSubjects(raw.subjects || [])
-  };
-
-  onlyIfValue(student, "passedUnderRegulation", clean(raw.passed_under_regulation));
-
-  if (raw.is_topper === true) {
-    student.isTopper = true;
-  }
-
-  onlyIfValue(student, "isImprovedResult", clean(raw.is_improved_result));
-  onlyIfValue(student, "isExpelled", clean(raw.is_expelled));
-  onlyIfValue(student, "divisionGraceMarks", stripLeadingZeros(raw.division_grace_marks));
-
-  return student;
-}
-
-// ===============================
-// CUSTOM JSON FORMATTER
-// ===============================
-function formatStudentOneLine(student) {
-  const lines = [];
-  lines.push("{");
-  lines.push(`  "studentName": ${JSON.stringify(student.studentName)},`);
-  lines.push(`  "fatherName": ${JSON.stringify(student.fatherName)},`);
-  lines.push(`  "regNumber": ${JSON.stringify(student.regNumber)},`);
-  lines.push(`  "BSEBUniqueId": ${JSON.stringify(student.BSEBUniqueId)},`);
-  lines.push(`  "schoolName": ${JSON.stringify(student.schoolName)},`);
-  lines.push(`  "rollCode": ${JSON.stringify(student.rollCode)},`);
-  lines.push(`  "rollNo": ${JSON.stringify(student.rollNo)},`);
-  lines.push(`  "examType": ${JSON.stringify(student.examType)},`);
-  lines.push(`  "totalMarks": ${JSON.stringify(student.totalMarks)},`);
-  lines.push(`  "division": ${JSON.stringify(student.division)},`);
-
-  if (student.passedUnderRegulation !== undefined) {
-    lines.push(`  "passedUnderRegulation": ${JSON.stringify(student.passedUnderRegulation)},`);
-  }
-
-  if (student.isTopper !== undefined) {
-    lines.push(`  "isTopper": ${JSON.stringify(student.isTopper)},`);
-  }
-
-  if (student.isImprovedResult !== undefined) {
-    lines.push(`  "isImprovedResult": ${JSON.stringify(student.isImprovedResult)},`);
-  }
-
-  if (student.isExpelled !== undefined) {
-    lines.push(`  "isExpelled": ${JSON.stringify(student.isExpelled)},`);
-  }
-
-  if (student.divisionGraceMarks !== undefined) {
-    lines.push(`  "divisionGraceMarks": ${JSON.stringify(student.divisionGraceMarks)},`);
-  }
-
-  lines.push(`  "subjects": [`);
-
-  const subjectLines = student.subjects.map((sub) => JSON.stringify(sub));
-  lines.push(`    ${subjectLines.join(",\n    ")}`);
-
-  lines.push(`  ]`);
-  lines.push("}");
-  return lines.join("\n");
-}
-
-// ===============================
-// FETCH RESULT
+// FETCH ONE RESULT
 // ===============================
 async function fetchResult(rollCode, rollNo) {
   try {
-    const url = `${API_URL}?roll_code=${encodeURIComponent(rollCode)}&roll_no=${encodeURIComponent(rollNo)}`;
+    const res = await client.get(API_URL, {
+      params: {
+        roll_code: String(rollCode),
+        roll_no: String(rollNo)
+      },
+      validateStatus: () => true
+    });
 
-    const res = await client.get(url);
+    const body = res.data;
 
-    if (!res.data || res.data.success !== true || !res.data.data) {
+    if (!body || body.success !== true || !body.data) {
       return { valid: false };
     }
 
-    const formatted = formatResult(res.data.data);
+    const data = body.data;
 
     if (
-      formatted.studentName &&
-      formatted.rollCode === String(rollCode) &&
-      formatted.rollNo === String(rollNo)
+      clean(data.roll_code) === String(rollCode) &&
+      clean(data.roll_no) === String(rollNo) &&
+      clean(data.school_name)
     ) {
-      return { valid: true, data: formatted };
+      return {
+        valid: true,
+        schoolName: clean(data.school_name)
+      };
     }
 
     return { valid: false };
-  } catch (err) {
-    return { valid: false, error: err.message };
+  } catch {
+    return { valid: false };
   }
 }
 
 // ===============================
-// MAIN TEST
+// CHECK ONE ROLL CODE
+// ===============================
+async function checkRollCode(rollCode) {
+  if (saveState.schoolList[rollCode]) {
+    console.log(`⏭️ ${rollCode} | Already saved`);
+    return;
+  }
+
+  const checks = await Promise.all(
+    IMPORTANT_ROLLNOS.map(rn => fetchResult(rollCode, rn))
+  );
+
+  for (const result of checks) {
+    if (result.valid) {
+      saveState.schoolList[rollCode] = result.schoolName;
+      saveState.newFound++;
+      saveState.totalSaved++;
+
+      console.log(`✅ ${rollCode} | ${result.schoolName}`);
+      return;
+    }
+  }
+
+  console.log(`⚠️ ${rollCode} | Invalid`);
+}
+
+// ===============================
+// GLOBAL STATE
+// ===============================
+const saveState = {
+  schoolList: {},
+  totalSaved: 0,
+  newFound: 0
+};
+
+// ===============================
+// MAIN
 // ===============================
 (async () => {
-  console.log(`🔍 Checking Roll Code: ${TEST_ROLL_CODE} | Roll No: ${TEST_ROLL_NO}`);
+  saveState.schoolList = loadJSON(OUTPUT_FILE, {});
+  saveState.totalSaved = Object.keys(saveState.schoolList).length;
 
-  const result = await fetchResult(TEST_ROLL_CODE, TEST_ROLL_NO);
+  console.log("🚀 BSEB 10TH ROLL CODE FINDER STARTED");
+  console.log(`📦 Range: ${ROLLCODE_START} to ${ROLLCODE_END}`);
+  console.log(`📦 Already saved roll codes: ${saveState.totalSaved}`);
+  console.log(`⚡ Parallel Roll Codes: ${ROLLCODE_PARALLEL}`);
+  console.log(`🎯 Test Roll Numbers: ${IMPORTANT_ROLLNOS.join(", ")}`);
 
-  if (result.valid) {
-    console.log("\n✅ RESULT FOUND");
-    console.log(formatStudentOneLine(result.data));
-
-    fs.writeFileSync(
-      OUTPUT_FILE,
-      formatStudentOneLine(result.data),
-      "utf8"
-    );
-
-    console.log(`\n💾 Saved as ${OUTPUT_FILE}`);
-  } else {
-    console.log("\n❌ No valid result found");
-    if (result.error) console.log("Error:", result.error);
+  const allRollCodes = [];
+  for (let rc = ROLLCODE_START; rc <= ROLLCODE_END; rc++) {
+    allRollCodes.push(String(rc));
   }
+
+  for (let i = 0; i < allRollCodes.length; i += ROLLCODE_PARALLEL) {
+    const chunk = allRollCodes.slice(i, i + ROLLCODE_PARALLEL);
+
+    console.log(`🚀 Roll code group: ${chunk[0]} to ${chunk[chunk.length - 1]}`);
+
+    await Promise.all(chunk.map(rc => checkRollCode(rc)));
+
+    if (saveState.newFound >= SAVE_EVERY_NEW) {
+      saveJSON(OUTPUT_FILE, saveState.schoolList);
+      console.log(`💾 Progress Saved | Total Roll Codes Saved: ${saveState.totalSaved}`);
+      saveState.newFound = 0;
+    }
+
+    saveJSON(OUTPUT_FILE, saveState.schoolList);
+    console.log(
+      `💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, allRollCodes.length)}/${allRollCodes.length} | Total Saved: ${saveState.totalSaved}`
+    );
+  }
+
+  saveJSON(OUTPUT_FILE, saveState.schoolList);
+
+  console.log(`🎉 COMPLETED | Total Valid Roll Codes Saved: ${saveState.totalSaved}`);
 })();
