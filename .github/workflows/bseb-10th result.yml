@@ -1,4 +1,4 @@
-name: BSEB 10th Test Result
+name: BSEB 10th Result Test
 
 on:
   workflow_dispatch:
@@ -20,37 +20,26 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: |
-          npm install puppeteer
+        run: npm install
 
-      - name: Show Files
-        run: |
-          echo "===== REPO FILES ====="
-          find . -maxdepth 3 -type f | sort
+      - name: Run Test Script
+        run: node "BSEB 10TH Result/script.js"
 
-      - name: Run 10th Test Script
-        run: |
-          node "BSEB 10TH Result/script.js"
-
-      - name: Show Output Files
+      - name: Show Output
         if: always()
         run: |
-          echo "===== OUTPUT FILES ====="
-          ls -lah
-          echo "===== BSEB 10TH Result Folder ====="
+          echo "===== OUTPUT FILE ====="
           ls -lah "BSEB 10TH Result" || true
+          echo "===== JSON CONTENT ====="
+          cat "BSEB 10TH Result/test-result-2026-10th.json" || true
 
-          echo "===== TEST RESULT JSON ====="
-          [ -f test-result-10th-2026.json ] && cat test-result-10th-2026.json || echo "No test-result-10th-2026.json found"
-
-          echo "===== DEBUG HTML ====="
-          [ -f debug-page.html ] && ls -lh debug-page.html || echo "No debug-page.html found"
-
-      - name: Upload Test Output
+      - name: Commit Test Result
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bseb-10th-test-output
-          path: |
-            test-result-10th-2026.json
-            debug-page.html
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add "BSEB 10TH Result/test-result-2026-10th.json"
+          git commit -m "Add BSEB 10th test result JSON" || echo "No changes to commit"
+          git pull --rebase origin main || true
+          git push
