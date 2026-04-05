@@ -1,0 +1,56 @@
+name: BSEB 10th Test Result
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-result:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: |
+          npm install puppeteer
+
+      - name: Show Files
+        run: |
+          echo "===== REPO FILES ====="
+          find . -maxdepth 3 -type f | sort
+
+      - name: Run 10th Test Script
+        run: |
+          node "BSEB 10TH Result/script.js"
+
+      - name: Show Output Files
+        if: always()
+        run: |
+          echo "===== OUTPUT FILES ====="
+          ls -lah
+          echo "===== BSEB 10TH Result Folder ====="
+          ls -lah "BSEB 10TH Result" || true
+
+          echo "===== TEST RESULT JSON ====="
+          [ -f test-result-10th-2026.json ] && cat test-result-10th-2026.json || echo "No test-result-10th-2026.json found"
+
+          echo "===== DEBUG HTML ====="
+          [ -f debug-page.html ] && ls -lh debug-page.html || echo "No debug-page.html found"
+
+      - name: Upload Test Output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseb-10th-test-output
+          path: |
+            test-result-10th-2026.json
+            debug-page.html
