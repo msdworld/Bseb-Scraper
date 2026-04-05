@@ -1,4 +1,4 @@
-name: BSEB 10th Result Test
+name: BSEB 10th API Test
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: npm install
+        run: npm install puppeteer
 
       - name: Run Test Script
         run: node "BSEB 10TH Result/script.js"
@@ -28,18 +28,20 @@ jobs:
       - name: Show Output
         if: always()
         run: |
-          echo "===== OUTPUT FILE ====="
+          echo "===== BSEB 10TH Result Folder ====="
           ls -lah "BSEB 10TH Result" || true
-          echo "===== JSON CONTENT ====="
-          cat "BSEB 10TH Result/test-result-2026-10th.json" || true
 
-      - name: Commit Test Result
+          echo "===== TEST RESULT JSON ====="
+          [ -f "BSEB 10TH Result/test-result-2026-10th.json" ] && cat "BSEB 10TH Result/test-result-2026-10th.json" || echo "No result JSON found"
+
+          echo "===== NETWORK LOG ====="
+          [ -f "BSEB 10TH Result/network-log.json" ] && cat "BSEB 10TH Result/network-log.json" || echo "No network log found"
+
+      - name: Upload Debug Files
         if: always()
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add "BSEB 10TH Result/test-result-2026-10th.json"
-          git commit -m "Add BSEB 10th test result JSON" || echo "No changes to commit"
-          git pull --rebase origin main || true
-          git push
+        uses: actions/upload-artifact@v4
+        with:
+          name: bseb-10th-api-test
+          path: |
+            BSEB 10TH Result/test-result-2026-10th.json
+            BSEB 10TH Result/network-log.json
