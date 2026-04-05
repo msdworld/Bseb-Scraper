@@ -6,7 +6,6 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     permissions:
       contents: write
@@ -14,6 +13,8 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -26,7 +27,7 @@ jobs:
       - name: Run School List Script
         run: node "BSEB 10TH Result/script.js"
 
-      - name: Validate Output
+      - name: Validate JSON
         run: |
           node - <<'EOF'
           const fs = require("fs");
@@ -34,13 +35,11 @@ jobs:
           const file = "bseb-10th-school-list-2026.json";
 
           if (!fs.existsSync(file)) {
-            console.error("❌ Output JSON missing");
+            console.error("❌ JSON file missing");
             process.exit(1);
           }
 
-          const raw = fs.readFileSync(file, "utf8");
-          const data = JSON.parse(raw);
-
+          const data = JSON.parse(fs.readFileSync(file, "utf8"));
           const keys = Object.keys(data);
 
           console.log("✅ JSON valid");
@@ -64,8 +63,19 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
+          # Remove npm junk from git state
+          git restore package.json package-lock.json || true
+          rm -rf node_modules
+
+          # Add only required file
           git add bseb-10th-school-list-2026.json
+
           git status
+
           git commit -m "Update BSEB 10th school list 2026" || echo "No changes to commit"
-          git pull --rebase origin main || true
+
+          # Pull safely before push
+          git fetch origin main
+          git rebase origin/main || true
+
           git push
