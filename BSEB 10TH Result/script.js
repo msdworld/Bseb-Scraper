@@ -3,74 +3,16 @@ const puppeteer = require("puppeteer");
 
 const RESULT_URL = "https://result.biharboardonline.org/result?roll_code=92006&roll_no=2600001";
 const OUTPUT_FILE = "BSEB 10TH Result/test-result-2026-10th.json";
-
-function clean(txt) {
-  return (txt || "").replace(/\s+/g, " ").trim();
-}
+const DEBUG_NETWORK_FILE = "BSEB 10TH Result/network-log.json";
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function parseResultTable(document) {
-  const data = {};
-
-  const rows = document.querySelectorAll("table tr");
-  rows.forEach(row => {
-    const cells = row.querySelectorAll("td, th");
-    if (cells.length === 2) {
-      const key = clean(cells[0].innerText).replace(/:$/, "");
-      const value = clean(cells[1].innerText);
-      if (key && value) {
-        data[key] = value;
-      }
-    }
-  });
-
-  return data;
-}
-
-function parseSubjects(document) {
-  const subjects = [];
-  const tables = document.querySelectorAll("table");
-
-  tables.forEach(table => {
-    const rows = table.querySelectorAll("tr");
-    if (rows.length < 3) return;
-
-    const headerText = clean(rows[0].innerText + " " + (rows[1]?.innerText || "")).toLowerCase();
-
-    if (
-      headerText.includes("subject") &&
-      headerText.includes("full marks") &&
-      headerText.includes("pass marks")
-    ) {
-      for (let i = 2; i < rows.length; i++) {
-        const cells = [...rows[i].querySelectorAll("td, th")].map(td => clean(td.innerText));
-        if (cells.length < 4) continue;
-
-        const subject = {
-          subject: cells[0] || "",
-          FMarks: cells[1] || "",
-          PMarks: cells[2] || "",
-          marks: cells[3] || "",
-        };
-
-        if (cells[4]) subject.extra1 = cells[4];
-        if (cells[5]) subject.extra2 = cells[5];
-        if (cells[6]) subject.extra3 = cells[6];
-        if (cells[7]) subject.total = cells[7];
-
-        subjects.push(subject);
-      }
-    }
-  });
-
-  return subjects;
-}
-
 (async () => {
   let browser;
+  const networkLogs = [];
+  let foundJson = null;
 
   try {
     console.log("🌐 Opening result page...");
@@ -86,103 +28,82 @@ function parseSubjects(document) {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     );
 
+    page.on("response", async (response) => {
+      try {
+        const url = response.url();
+        const status = response.status();
+        const headers = response.headers();
+        const contentType = headers["content-type"] || "";
+
+        networkLogs.push({
+          url,
+          status,
+          contentType
+        });
+
+        // Try only likely JSON / API responses
+        if (
+          contentType.includes("application/json") ||
+          url.includes("/api") ||
+          url.includes("result") ||
+          url.includes("roll_code") ||
+          url.includes("roll_no")
+        ) {
+          let bodyText = "";
+
+          try {
+            bodyText = await response.text();
+          } catch {
+            return;
+          }
+
+          // Save if looks useful
+          if (
+            bodyText &&
+            bodyText.length > 50 &&
+            (
+              bodyText.includes("Student") ||
+              bodyText.includes("student") ||
+              bodyText.includes("roll") ||
+              bodyText.includes("marks") ||
+              bodyText.includes("subject") ||
+              bodyText.includes("name")
+            )
+          ) {
+            console.log(`📡 Possible result response found: ${url}`);
+
+            try {
+              foundJson = JSON.parse(bodyText);
+            } catch {
+              foundJson = {
+                url,
+                raw: bodyText
+              };
+            }
+          }
+        }
+      } catch {}
+    });
+
     await page.goto(RESULT_URL, {
-      waitUntil: "domcontentloaded",
+      waitUntil: "networkidle2",
       timeout: 60000
     });
 
-    await delay(5000);
+    await delay(8000);
 
-    const result = await page.evaluate(() => {
-      function clean(txt) {
-        return (txt || "").replace(/\s+/g, " ").trim();
-      }
+    // Save network log always
+    fs.writeFileSync(DEBUG_NETWORK_FILE, JSON.stringify(networkLogs, null, 2), "utf8");
 
-      function parseResultTable(document) {
-        const data = {};
-
-        const rows = document.querySelectorAll("table tr");
-        rows.forEach(row => {
-          const cells = row.querySelectorAll("td, th");
-          if (cells.length === 2) {
-            const key = clean(cells[0].innerText).replace(/:$/, "");
-            const value = clean(cells[1].innerText);
-            if (key && value) {
-              data[key] = value;
-            }
-          }
-        });
-
-        return data;
-      }
-
-      function parseSubjects(document) {
-        const subjects = [];
-        const tables = document.querySelectorAll("table");
-
-        tables.forEach(table => {
-          const rows = table.querySelectorAll("tr");
-          if (rows.length < 3) return;
-
-          const headerText = clean(rows[0].innerText + " " + (rows[1]?.innerText || "")).toLowerCase();
-
-          if (
-            headerText.includes("subject") &&
-            headerText.includes("full marks") &&
-            headerText.includes("pass marks")
-          ) {
-            for (let i = 2; i < rows.length; i++) {
-              const cells = [...rows[i].querySelectorAll("td, th")].map(td => clean(td.innerText));
-              if (cells.length < 4) continue;
-
-              const subject = {
-                subject: cells[0] || "",
-                FMarks: cells[1] || "",
-                PMarks: cells[2] || "",
-                marks: cells[3] || "",
-              };
-
-              if (cells[4]) subject.extra1 = cells[4];
-              if (cells[5]) subject.extra2 = cells[5];
-              if (cells[6]) subject.extra3 = cells[6];
-              if (cells[7]) subject.total = cells[7];
-
-              subjects.push(subject);
-            }
-          }
-        });
-
-        return subjects;
-      }
-
-      const kv = parseResultTable(document);
-      const subjects = parseSubjects(document);
-
-      return {
-        studentName: kv["Student Name"] || kv["Student's Name"] || null,
-        fatherName: kv["Father Name"] || kv["Father's Name"] || null,
-        motherName: kv["Mother Name"] || kv["Mother's Name"] || null,
-        schoolName: kv["School Name"] || kv["School/College Name"] || null,
-        rollCode: kv["Roll Code"] || null,
-        rollNo: kv["Roll No"] || kv["Roll Number"] || null,
-        registrationNo: kv["Registration No"] || kv["Registration Number"] || null,
-        faculty: kv["Faculty"] || kv["Stream"] || null,
-        totalMarks: kv["Total Marks"] || kv["Aggregate Marks"] || null,
-        result: kv["Result"] || kv["Division"] || kv["Result/Division"] || null,
-        subjects
-      };
-    });
-
-    if (!result.studentName) {
-      console.log("❌ No valid result found");
-      process.exit(1);
+    if (foundJson) {
+      fs.writeFileSync(OUTPUT_FILE, JSON.stringify(foundJson, null, 2), "utf8");
+      console.log("✅ RESULT API CAPTURED");
+      console.log(JSON.stringify(foundJson, null, 2));
+      console.log(`💾 Saved: ${OUTPUT_FILE}`);
+    } else {
+      console.log("❌ No result JSON captured.");
+      console.log("💾 Network log saved for inspection.");
     }
-
-    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(result, null, 2), "utf8");
-
-    console.log("✅ RESULT FOUND");
-    console.log(JSON.stringify(result, null, 2));
-    console.log(`💾 Saved to: ${OUTPUT_FILE}`);
 
   } catch (err) {
     console.error("❌ ERROR:", err.message);
