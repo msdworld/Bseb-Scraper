@@ -13,8 +13,8 @@ const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
 const OUTPUT_FILE = "bseb-12th-full-result-2026.json";
 
 // Roll number range per roll code
-const ROLLNO_START = 26020001;
-const ROLLNO_END = 26020999;
+const ROLLNO_START = 26030001;
+const ROLLNO_END = 26030999;
 
 // SPEED
 const ROLLCODE_PARALLEL = 20;
@@ -28,8 +28,8 @@ const SAVE_EVERY_VALID_RESULTS = 100;
 // ===============================
 // SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
-const START_INDEX = 7001;
-const END_INDEX = 9048;
+const START_INDEX = 0;
+const END_INDEX = 100;
 
 // ===============================
 // AXIOS CLIENT
