@@ -15,20 +15,20 @@ const OUTPUT_GZ = "bseb-10th-full-result-2026.json.gz";
 const ROLLNO_START = 2600001;
 const ROLLNO_END = 2600999;
 
-// SPEED
-const ROLLCODE_PARALLEL = 10;
-const CONCURRENCY = 999;
+// SPEED (safer final settings)
+const ROLLCODE_PARALLEL = 5;
+const CONCURRENCY = 200;
 const BATCH_SIZE = 100;
 const REQUEST_TIMEOUT = 5000;
 
 // SAVE
-const SAVE_EVERY_VALID_RESULTS = 300;
+const SAVE_EVERY_VALID_RESULTS = 2000; // now only informational
 
 // ===============================
 // SPLIT RANGE (CHANGE EACH RUN)
 // ===============================
-const START_INDEX = 5050;
-const END_INDEX = 5100;
+const START_INDEX = 5001;
+const END_INDEX = 5050;
 
 // ===============================
 // AXIOS CLIENT
@@ -101,15 +101,7 @@ function compressJSONToGZ() {
 }
 
 // ===============================
-// SAFE JSON SAVER (NO MEMORY CRASH)
-// ===============================
-function saveCustomJSON(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data), "utf8");
-  compressJSONToGZ();
-}
-
-// ===============================
-// SUBJECT FORMATTER
+// SUBJECT FORMATTER (ONE LINER)
 // ===============================
 function buildPractical(subject) {
   const projectWork = normalizeMarks(subject.project_work);
@@ -151,43 +143,23 @@ function formatSubjects(subjects = []) {
     const practical = buildPractical(sub);
     if (practical) obj.practical = practical;
 
-    if (
-      sub.sub_result !== null &&
-      sub.sub_result !== undefined &&
-      clean(sub.sub_result) !== ""
-    ) {
+    if (sub.sub_result !== null && sub.sub_result !== undefined && clean(sub.sub_result) !== "") {
       obj.subResult = clean(sub.sub_result);
     }
 
-    if (
-      sub.regulation !== null &&
-      sub.regulation !== undefined &&
-      clean(sub.regulation) !== ""
-    ) {
+    if (sub.regulation !== null && sub.regulation !== undefined && clean(sub.regulation) !== "") {
       obj.regulation = clean(sub.regulation);
     }
 
-    if (
-      sub.cce !== null &&
-      sub.cce !== undefined &&
-      clean(sub.cce) !== ""
-    ) {
+    if (sub.cce !== null && sub.cce !== undefined && clean(sub.cce) !== "") {
       obj.cce = clean(sub.cce);
     }
 
-    if (
-      sub.is_compartmental !== null &&
-      sub.is_compartmental !== undefined &&
-      clean(sub.is_compartmental) !== ""
-    ) {
+    if (sub.is_compartmental !== null && sub.is_compartmental !== undefined && clean(sub.is_compartmental) !== "") {
       obj.isCompartmental = clean(sub.is_compartmental);
     }
 
-    if (
-      sub.is_improved_sub !== null &&
-      sub.is_improved_sub !== undefined &&
-      clean(sub.is_improved_sub) !== ""
-    ) {
+    if (sub.is_improved_sub !== null && sub.is_improved_sub !== undefined && clean(sub.is_improved_sub) !== "") {
       obj.isImprovedSub = clean(sub.is_improved_sub);
     }
 
@@ -213,11 +185,7 @@ function formatStudent(data) {
     subjects: formatSubjects(data.subjects || [])
   };
 
-  if (
-    data.passed_under_regulation !== null &&
-    data.passed_under_regulation !== undefined &&
-    clean(data.passed_under_regulation) !== ""
-  ) {
+  if (data.passed_under_regulation !== null && data.passed_under_regulation !== undefined && clean(data.passed_under_regulation) !== "") {
     student.passedUnderRegulation = clean(data.passed_under_regulation);
   }
 
@@ -225,31 +193,27 @@ function formatStudent(data) {
     student.isTopper = true;
   }
 
-  if (
-    data.is_improved_result !== null &&
-    data.is_improved_result !== undefined &&
-    clean(data.is_improved_result) !== ""
-  ) {
+  if (data.is_improved_result !== null && data.is_improved_result !== undefined && clean(data.is_improved_result) !== "") {
     student.isImprovedResult = clean(data.is_improved_result);
   }
 
-  if (
-    data.is_expelled !== null &&
-    data.is_expelled !== undefined &&
-    clean(data.is_expelled) !== ""
-  ) {
+  if (data.is_expelled !== null && data.is_expelled !== undefined && clean(data.is_expelled) !== "") {
     student.isExpelled = clean(data.is_expelled);
   }
 
-  if (
-    data.division_grace_marks !== null &&
-    data.division_grace_marks !== undefined &&
-    clean(data.division_grace_marks) !== ""
-  ) {
+  if (data.division_grace_marks !== null && data.division_grace_marks !== undefined && clean(data.division_grace_marks) !== "") {
     student.divisionGraceMarks = clean(data.division_grace_marks);
   }
 
   return student;
+}
+
+// ===============================
+// SAFE SAVE
+// ===============================
+function saveCustomJSON(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data), "utf8");
+  compressJSONToGZ();
 }
 
 // ===============================
@@ -338,12 +302,6 @@ async function processRollCode(rollCode) {
             saveState.lastThisRunStudent = result.data;
           }
         }
-      }
-
-      if (saveState.unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
-        saveCustomJSON(OUTPUT_JSON, saveState.fullResults);
-        console.log(`💾 Progress Saved | Total Saved: ${saveState.totalStudentsSaved}`);
-        saveState.unsavedValidCount = 0;
       }
     }
 
