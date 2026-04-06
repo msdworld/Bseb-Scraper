@@ -1,4 +1,4 @@
-name: Restore BSEB 10th Backup
+name: Restore BSEB 10th Backup By Commit ID
 
 on:
   workflow_dispatch:
@@ -8,24 +8,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repo
+      - name: Checkout Full Repo History
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Show Current File Size Before Restore
+      - name: Show Current Broken File
         run: |
-          echo "===== BEFORE RESTORE ====="
+          echo "===== CURRENT FILE ====="
           ls -lh bseb-10th-full-result-2026.json.gz || true
           du -h bseb-10th-full-result-2026.json.gz || true
 
-      - name: Restore Old Valid Backup From Good Commit
+      - name: Restore Exact Good Backup File From Commit ID
         run: |
           git checkout 7519a2f -- bseb-10th-full-result-2026.json.gz
 
-      - name: Verify Restored File
+      - name: Verify Restored File Size
         run: |
-          echo "===== AFTER RESTORE ====="
+          echo "===== RESTORED FILE ====="
           ls -lh bseb-10th-full-result-2026.json.gz
           du -h bseb-10th-full-result-2026.json.gz
 
@@ -38,7 +38,7 @@ jobs:
 
           git diff --cached --quiet && echo "No changes to commit" && exit 0
 
-          git commit -m "Restore valid BSEB 10th full result backup"
+          git commit -m "Restore valid BSEB 10th backup from commit 7519a2f"
           git pull --rebase origin main
           git push origin main
 
