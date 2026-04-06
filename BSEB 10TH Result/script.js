@@ -33,8 +33,8 @@ const SAVE_EVERY_VALID_RESULTS = 100;
 // ===============================
 // SPLIT RANGE (CHANGE EACH RUN)
 // ===============================
-const START_INDEX = 6980;
-const END_INDEX = 7000;
+const START_INDEX = 1980;
+const END_INDEX = 2000;
 
 // ===============================
 // AXIOS CLIENT
