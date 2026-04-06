@@ -1,4 +1,4 @@
-name: Extract Seen RollNos From Main GZ
+name: Extract Seen RollNo IDs From Main GZ
 
 on:
   workflow_dispatch:
@@ -14,77 +14,105 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           persist-credentials: true
 
-      - name: Show Existing Files
-        run: |
-          echo "===== FILES IN REPO ====="
-          ls -lh || true
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-      - name: Check Main GZ Exists
+      - name: Restore Main GZ from Repo
         run: |
-          if [ ! -f bseb-10th-full-result-2026.json.gz ]; then
-            echo "❌ File not found: bseb-10th-full-result-2026.json.gz"
-            exit 1
-          fi
-
-          echo "✅ Found main GZ"
-          ls -lh bseb-10th-full-result-2026.json.gz
+          echo "===== CHECK MAIN GZ ====="
+          ls -lh bseb-10th-full-result-2026.json.gz || true
 
       - name: Extract rollCode-rollNo IDs
         run: |
-          echo "📦 Extracting rollCode-rollNo IDs..."
-          rm -f bseb-10th-seen-rollnos.txt
-          touch bseb-10th-seen-rollnos.txt
+          node - <<'EOF'
+          const fs = require("fs");
+          const zlib = require("zlib");
+          const readline = require("readline");
 
-          gunzip -c bseb-10th-full-result-2026.json.gz > extracted.json
+          const INPUT_GZ = "bseb-10th-full-result-2026.json.gz";
+          const OUTPUT_TXT = "bseb-10th-seen-rollnos.txt";
 
-          awk '
-            BEGIN { current_rollcode = "" }
+          if (!fs.existsSync(INPUT_GZ)) {
+            console.log("❌ Main GZ file not found");
+            process.exit(1);
+          }
 
-            /^[[:space:]]*"([0-9]{5})"[[:space:]]*:[[:space:]]*{/ {
-              line = $0
-              gsub(/^[[:space:]]*"/, "", line)
-              gsub(/".*$/, "", line)
-              current_rollcode = line
+          console.log("🔍 Extracting rollCode-rollNo IDs from large GZ...");
+
+          const seen = new Set();
+          let total = 0;
+
+          const gunzip = zlib.createGunzip();
+          const input = fs.createReadStream(INPUT_GZ).pipe(gunzip);
+
+          const rl = readline.createInterface({
+            input,
+            crlfDelay: Infinity
+          });
+
+          // Matches:
+          // "2600001": {
+          // inside rollCode block already known from previous lines
+          let currentRollCode = null;
+
+          rl.on("line", (line) => {
+            // Match rollCode block like: "11001": {
+            const rcMatch = line.match(/^\s*"(\d{5})":\s*\{$/);
+            if (rcMatch) {
+              currentRollCode = rcMatch[1];
+              return;
             }
 
-            /^[[:space:]]*"([0-9]{7})"[[:space:]]*:[[:space:]]*{/ {
-              line = $0
-              gsub(/^[[:space:]]*"/, "", line)
-              gsub(/".*$/, "", line)
-              if (current_rollcode != "") {
-                print current_rollcode "-" line
+            // Match rollNo student like: "2600001": {
+            const rnMatch = line.match(/^\s*"(\d{7})":\s*\{$/);
+            if (rnMatch && currentRollCode) {
+              const rollNo = rnMatch[1];
+              const id = `${currentRollCode}-${rollNo}`;
+              if (!seen.has(id)) {
+                seen.add(id);
+                total++;
+
+                if (total % 50000 === 0) {
+                  console.log(`📦 Extracted ${total} IDs...`);
+                }
               }
             }
-          ' extracted.json | sort -u > bseb-10th-seen-rollnos.txt
+          });
 
-          echo "✅ Extraction complete"
+          rl.on("close", () => {
+            fs.writeFileSync(OUTPUT_TXT, Array.from(seen).sort().join("\n"), "utf8");
+            console.log(`✅ Extraction complete`);
+            console.log(`📚 Total IDs Extracted: ${total}`);
+          });
+          EOF
+
+      - name: Show Extracted File
+        run: |
           echo "===== TOTAL IDS ====="
           wc -l bseb-10th-seen-rollnos.txt || true
 
+          echo "===== FILE SIZE ====="
+          ls -lh bseb-10th-seen-rollnos.txt || true
+          du -h bseb-10th-seen-rollnos.txt || true
+
           echo "===== FIRST 10 ====="
-          head -10 bseb-10th-seen-rollnos.txt || true
+          head -n 10 bseb-10th-seen-rollnos.txt || true
 
           echo "===== LAST 10 ====="
-          tail -10 bseb-10th-seen-rollnos.txt || true
+          tail -n 10 bseb-10th-seen-rollnos.txt || true
 
-          rm -f extracted.json
-
-      - name: Commit and Push Seen File
+      - name: Commit Extracted IDs
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           git add bseb-10th-seen-rollnos.txt
-          git commit -m "Extract seen rollCode-rollNo IDs from main GZ" || echo "No changes to commit"
+          git commit -m "Add extracted seen rollCode-rollNo IDs" || echo "No changes to commit"
 
-          git pull --rebase origin main || true
+          git fetch origin main
+          git rebase origin/main || true
           git push
-
-      - name: Upload Artifact Backup
-        uses: actions/upload-artifact@v4
-        with:
-          name: bseb-10th-seen-rollnos-backup
-          path: bseb-10th-seen-rollnos.txt
