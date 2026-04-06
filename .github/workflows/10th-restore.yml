@@ -1,52 +1,90 @@
-name: Restore BSEB 10th Backup By Commit ID
+name: Extract Seen RollNos From Main GZ
 
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  restore-backup:
+  extract:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
     steps:
-      - name: Checkout Full Repo History
+      - name: Checkout Repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: true
 
-      - name: Show Current Broken File
+      - name: Show Existing Files
         run: |
-          echo "===== CURRENT FILE ====="
-          ls -lh bseb-10th-full-result-2026.json.gz || true
-          du -h bseb-10th-full-result-2026.json.gz || true
+          echo "===== FILES IN REPO ====="
+          ls -lh || true
 
-      - name: Restore Exact Good Backup File From Commit ID
+      - name: Check Main GZ Exists
         run: |
-          git checkout 7519a2f -- bseb-10th-full-result-2026.json.gz
+          if [ ! -f bseb-10th-full-result-2026.json.gz ]; then
+            echo "❌ File not found: bseb-10th-full-result-2026.json.gz"
+            exit 1
+          fi
 
-      - name: Verify Restored File Size
-        run: |
-          echo "===== RESTORED FILE ====="
+          echo "✅ Found main GZ"
           ls -lh bseb-10th-full-result-2026.json.gz
-          du -h bseb-10th-full-result-2026.json.gz
 
-      - name: Commit Restored Backup
+      - name: Extract rollCode-rollNo IDs
+        run: |
+          echo "📦 Extracting rollCode-rollNo IDs..."
+          rm -f bseb-10th-seen-rollnos.txt
+          touch bseb-10th-seen-rollnos.txt
+
+          gunzip -c bseb-10th-full-result-2026.json.gz > extracted.json
+
+          awk '
+            BEGIN { current_rollcode = "" }
+
+            /^[[:space:]]*"([0-9]{5})"[[:space:]]*:[[:space:]]*{/ {
+              line = $0
+              gsub(/^[[:space:]]*"/, "", line)
+              gsub(/".*$/, "", line)
+              current_rollcode = line
+            }
+
+            /^[[:space:]]*"([0-9]{7})"[[:space:]]*:[[:space:]]*{/ {
+              line = $0
+              gsub(/^[[:space:]]*"/, "", line)
+              gsub(/".*$/, "", line)
+              if (current_rollcode != "") {
+                print current_rollcode "-" line
+              }
+            }
+          ' extracted.json | sort -u > bseb-10th-seen-rollnos.txt
+
+          echo "✅ Extraction complete"
+          echo "===== TOTAL IDS ====="
+          wc -l bseb-10th-seen-rollnos.txt || true
+
+          echo "===== FIRST 10 ====="
+          head -10 bseb-10th-seen-rollnos.txt || true
+
+          echo "===== LAST 10 ====="
+          tail -10 bseb-10th-seen-rollnos.txt || true
+
+          rm -f extracted.json
+
+      - name: Commit and Push Seen File
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add bseb-10th-full-result-2026.json.gz
+          git add bseb-10th-seen-rollnos.txt
+          git commit -m "Extract seen rollCode-rollNo IDs from main GZ" || echo "No changes to commit"
 
-          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git pull --rebase origin main || true
+          git push
 
-          git commit -m "Restore valid BSEB 10th backup from commit 7519a2f"
-          git pull --rebase origin main
-          git push origin main
-
-      - name: Upload Restored Backup Artifact
+      - name: Upload Artifact Backup
         uses: actions/upload-artifact@v4
         with:
-          name: restored-bseb-10th-backup
-          path: bseb-10th-full-result-2026.json.gz
+          name: bseb-10th-seen-rollnos-backup
+          path: bseb-10th-seen-rollnos.txt
