@@ -21,17 +21,16 @@ jobs:
         with:
           node-version: 20
 
-      - name: Restore Main GZ from Repo
+      - name: Check Main GZ
         run: |
           echo "===== CHECK MAIN GZ ====="
           ls -lh bseb-10th-full-result-2026.json.gz || true
 
-      - name: Extract rollCode-rollNo IDs
+      - name: Extract rollCode-rollNo IDs (Chunk Regex Method)
         run: |
           node - <<'EOF'
           const fs = require("fs");
           const zlib = require("zlib");
-          const readline = require("readline");
 
           const INPUT_GZ = "bseb-10th-full-result-2026.json.gz";
           const OUTPUT_TXT = "bseb-10th-seen-rollnos.txt";
@@ -41,37 +40,59 @@ jobs:
             process.exit(1);
           }
 
-          console.log("🔍 Extracting rollCode-rollNo IDs from large GZ...");
+          console.log("🔍 Extracting rollCode-rollNo IDs using chunk regex...");
 
           const seen = new Set();
           let total = 0;
 
-          const gunzip = zlib.createGunzip();
-          const input = fs.createReadStream(INPUT_GZ).pipe(gunzip);
+          let buffer = "";
 
-          const rl = readline.createInterface({
-            input,
-            crlfDelay: Infinity
+          const gunzip = zlib.createGunzip();
+          const stream = fs.createReadStream(INPUT_GZ).pipe(gunzip);
+
+          stream.on("data", (chunk) => {
+            buffer += chunk.toString("utf8");
+
+            // Keep only last part to handle split patterns safely
+            if (buffer.length > 500000) {
+              processBuffer(buffer.slice(0, 400000));
+              buffer = buffer.slice(400000);
+            }
           });
 
-          // Matches:
-          // "2600001": {
-          // inside rollCode block already known from previous lines
-          let currentRollCode = null;
+          stream.on("end", () => {
+            processBuffer(buffer);
 
-          rl.on("line", (line) => {
-            // Match rollCode block like: "11001": {
-            const rcMatch = line.match(/^\s*"(\d{5})":\s*\{$/);
-            if (rcMatch) {
-              currentRollCode = rcMatch[1];
-              return;
-            }
+            const sorted = Array.from(seen).sort((a, b) => {
+              const [rcA, rnA] = a.split("-").map(Number);
+              const [rcB, rnB] = b.split("-").map(Number);
+              if (rcA !== rcB) return rcA - rcB;
+              return rnA - rnB;
+            });
 
-            // Match rollNo student like: "2600001": {
-            const rnMatch = line.match(/^\s*"(\d{7})":\s*\{$/);
-            if (rnMatch && currentRollCode) {
-              const rollNo = rnMatch[1];
-              const id = `${currentRollCode}-${rollNo}`;
+            fs.writeFileSync(OUTPUT_TXT, sorted.join("\n"), "utf8");
+
+            console.log("✅ Extraction complete");
+            console.log(`📚 Total IDs Extracted: ${total}`);
+          });
+
+          stream.on("error", (err) => {
+            console.log("❌ Stream error:", err.message);
+            process.exit(1);
+          });
+
+          function processBuffer(text) {
+            // Match blocks like:
+            // "11001":{"2600001":{
+            // OR with spaces/newlines
+            const regex = /"(\d{5})"\s*:\s*\{\s*"(\d{7})"\s*:\s*\{/g;
+
+            let match;
+            while ((match = regex.exec(text)) !== null) {
+              const rollCode = match[1];
+              const rollNo = match[2];
+              const id = `${rollCode}-${rollNo}`;
+
               if (!seen.has(id)) {
                 seen.add(id);
                 total++;
@@ -81,13 +102,35 @@ jobs:
                 }
               }
             }
-          });
 
-          rl.on("close", () => {
-            fs.writeFileSync(OUTPUT_TXT, Array.from(seen).sort().join("\n"), "utf8");
-            console.log(`✅ Extraction complete`);
-            console.log(`📚 Total IDs Extracted: ${total}`);
-          });
+            // ALSO catch remaining rollNos inside same rollCode block
+            // This helps for patterns like:
+            // "11001":{"2600001":{...},"2600002":{...},"2600003":{...}}
+            const rollCodeRegex = /"(\d{5})"\s*:\s*\{([\s\S]*?)(?="(\d{5})"\s*:\s*\{|$)/g;
+            let rcMatch;
+
+            while ((rcMatch = rollCodeRegex.exec(text)) !== null) {
+              const rollCode = rcMatch[1];
+              const block = rcMatch[2];
+
+              const rnRegex = /"(\d{7})"\s*:\s*\{/g;
+              let rnMatch;
+
+              while ((rnMatch = rnRegex.exec(block)) !== null) {
+                const rollNo = rnMatch[1];
+                const id = `${rollCode}-${rollNo}`;
+
+                if (!seen.has(id)) {
+                  seen.add(id);
+                  total++;
+
+                  if (total % 50000 === 0) {
+                    console.log(`📦 Extracted ${total} IDs...`);
+                  }
+                }
+              }
+            }
+          }
           EOF
 
       - name: Show Extracted File
