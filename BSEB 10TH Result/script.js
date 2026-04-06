@@ -22,8 +22,8 @@ const ROLLNO_START = 2600001;
 const ROLLNO_END = 2600999;
 
 // SPEED
-const ROLLCODE_PARALLEL = 100;
-const CONCURRENCY = 999;
+const ROLLCODE_PARALLEL = 10;
+const CONCURRENCY = 200;
 const BATCH_SIZE = 200;
 const REQUEST_TIMEOUT = 5000;
 
@@ -34,7 +34,7 @@ const SAVE_EVERY_VALID_RESULTS = 100;
 // SPLIT RANGE (CHANGE EACH RUN)
 // ===============================
 const START_INDEX = 0;
-const END_INDEX = 100;
+const END_INDEX = 2000;
 
 // ===============================
 // AXIOS CLIENT
