@@ -3,6 +3,9 @@ name: Restore BSEB 10th Backup By Commit ID
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   restore-backup:
     runs-on: ubuntu-latest
