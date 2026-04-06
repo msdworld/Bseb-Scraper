@@ -101,7 +101,15 @@ function compressJSONToGZ() {
 }
 
 // ===============================
-// SUBJECT FORMATTER (ONE LINER)
+// SAFE JSON SAVER (NO MEMORY CRASH)
+// ===============================
+function saveCustomJSON(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data), "utf8");
+  compressJSONToGZ();
+}
+
+// ===============================
+// SUBJECT FORMATTER
 // ===============================
 function buildPractical(subject) {
   const projectWork = normalizeMarks(subject.project_work);
@@ -143,23 +151,43 @@ function formatSubjects(subjects = []) {
     const practical = buildPractical(sub);
     if (practical) obj.practical = practical;
 
-    if (sub.sub_result !== null && sub.sub_result !== undefined && clean(sub.sub_result) !== "") {
+    if (
+      sub.sub_result !== null &&
+      sub.sub_result !== undefined &&
+      clean(sub.sub_result) !== ""
+    ) {
       obj.subResult = clean(sub.sub_result);
     }
 
-    if (sub.regulation !== null && sub.regulation !== undefined && clean(sub.regulation) !== "") {
+    if (
+      sub.regulation !== null &&
+      sub.regulation !== undefined &&
+      clean(sub.regulation) !== ""
+    ) {
       obj.regulation = clean(sub.regulation);
     }
 
-    if (sub.cce !== null && sub.cce !== undefined && clean(sub.cce) !== "") {
+    if (
+      sub.cce !== null &&
+      sub.cce !== undefined &&
+      clean(sub.cce) !== ""
+    ) {
       obj.cce = clean(sub.cce);
     }
 
-    if (sub.is_compartmental !== null && sub.is_compartmental !== undefined && clean(sub.is_compartmental) !== "") {
+    if (
+      sub.is_compartmental !== null &&
+      sub.is_compartmental !== undefined &&
+      clean(sub.is_compartmental) !== ""
+    ) {
       obj.isCompartmental = clean(sub.is_compartmental);
     }
 
-    if (sub.is_improved_sub !== null && sub.is_improved_sub !== undefined && clean(sub.is_improved_sub) !== "") {
+    if (
+      sub.is_improved_sub !== null &&
+      sub.is_improved_sub !== undefined &&
+      clean(sub.is_improved_sub) !== ""
+    ) {
       obj.isImprovedSub = clean(sub.is_improved_sub);
     }
 
@@ -185,7 +213,11 @@ function formatStudent(data) {
     subjects: formatSubjects(data.subjects || [])
   };
 
-  if (data.passed_under_regulation !== null && data.passed_under_regulation !== undefined && clean(data.passed_under_regulation) !== "") {
+  if (
+    data.passed_under_regulation !== null &&
+    data.passed_under_regulation !== undefined &&
+    clean(data.passed_under_regulation) !== ""
+  ) {
     student.passedUnderRegulation = clean(data.passed_under_regulation);
   }
 
@@ -193,97 +225,31 @@ function formatStudent(data) {
     student.isTopper = true;
   }
 
-  if (data.is_improved_result !== null && data.is_improved_result !== undefined && clean(data.is_improved_result) !== "") {
+  if (
+    data.is_improved_result !== null &&
+    data.is_improved_result !== undefined &&
+    clean(data.is_improved_result) !== ""
+  ) {
     student.isImprovedResult = clean(data.is_improved_result);
   }
 
-  if (data.is_expelled !== null && data.is_expelled !== undefined && clean(data.is_expelled) !== "") {
+  if (
+    data.is_expelled !== null &&
+    data.is_expelled !== undefined &&
+    clean(data.is_expelled) !== ""
+  ) {
     student.isExpelled = clean(data.is_expelled);
   }
 
-  if (data.division_grace_marks !== null && data.division_grace_marks !== undefined && clean(data.division_grace_marks) !== "") {
+  if (
+    data.division_grace_marks !== null &&
+    data.division_grace_marks !== undefined &&
+    clean(data.division_grace_marks) !== ""
+  ) {
     student.divisionGraceMarks = clean(data.division_grace_marks);
   }
 
   return student;
-}
-
-// ===============================
-// CUSTOM JSON FORMATTER
-// ===============================
-function formatStudentJSON(student, indent = "    ") {
-  const lines = [];
-  lines.push("{");
-  lines.push(`${indent}"studentName": ${JSON.stringify(student.studentName)},`);
-  lines.push(`${indent}"fatherName": ${JSON.stringify(student.fatherName)},`);
-  lines.push(`${indent}"regNumber": ${JSON.stringify(student.regNumber)},`);
-  lines.push(`${indent}"BSEBUniqueId": ${JSON.stringify(student.BSEBUniqueId)},`);
-  lines.push(`${indent}"schoolName": ${JSON.stringify(student.schoolName)},`);
-  lines.push(`${indent}"rollCode": ${JSON.stringify(student.rollCode)},`);
-  lines.push(`${indent}"rollNo": ${JSON.stringify(student.rollNo)},`);
-  lines.push(`${indent}"examType": ${JSON.stringify(student.examType)},`);
-  lines.push(`${indent}"totalMarks": ${JSON.stringify(student.totalMarks)},`);
-  lines.push(`${indent}"division": ${JSON.stringify(student.division)},`);
-
-  if (student.passedUnderRegulation !== undefined) {
-    lines.push(`${indent}"passedUnderRegulation": ${JSON.stringify(student.passedUnderRegulation)},`);
-  }
-
-  if (student.isTopper === true) {
-    lines.push(`${indent}"isTopper": true,`);
-  }
-
-  if (student.isImprovedResult !== undefined) {
-    lines.push(`${indent}"isImprovedResult": ${JSON.stringify(student.isImprovedResult)},`);
-  }
-
-  if (student.isExpelled !== undefined) {
-    lines.push(`${indent}"isExpelled": ${JSON.stringify(student.isExpelled)},`);
-  }
-
-  if (student.divisionGraceMarks !== undefined) {
-    lines.push(`${indent}"divisionGraceMarks": ${JSON.stringify(student.divisionGraceMarks)},`);
-  }
-
-  lines.push(`${indent}"subjects": [`);
-
-  const subjectLines = student.subjects.map((sub) => {
-    return `${indent}  ${JSON.stringify(sub)}`;
-  });
-
-  lines.push(subjectLines.join(",\n"));
-  lines.push(`${indent}]`);
-  lines.push("}");
-  return lines.join("\n");
-}
-
-function saveCustomJSON(file, data) {
-  const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-  const lines = [];
-  lines.push("{");
-
-  rollCodes.forEach((rollCode, idx) => {
-    const students = data[rollCode] || {};
-    const rollNoKeys = Object.keys(students).sort((a, b) => Number(a) - Number(b));
-
-    lines.push(`  ${JSON.stringify(rollCode)}: {`);
-
-    rollNoKeys.forEach((rollNo, i) => {
-      const student = students[rollNo];
-      const formatted = formatStudentJSON(student, "      ")
-        .split("\n")
-        .map((line, index) => (index === 0 ? `    ${JSON.stringify(rollNo)}: ${line}` : `    ${line}`))
-        .join("\n");
-
-      lines.push(formatted + (i < rollNoKeys.length - 1 ? "," : ""));
-    });
-
-    lines.push(`  }${idx < rollCodes.length - 1 ? "," : ""}`);
-  });
-
-  lines.push("}");
-  fs.writeFileSync(file, lines.join("\n"), "utf8");
-  compressJSONToGZ();
 }
 
 // ===============================
@@ -335,8 +301,6 @@ const saveState = {
 // ===============================
 async function processRollCode(rollCode) {
   if (!saveState.fullResults[rollCode]) saveState.fullResults[rollCode] = {};
-
-  const alreadySavedForRollCode = Object.keys(saveState.fullResults[rollCode]).length;
 
   let currentRollNo = ROLLNO_START;
   let savedInThisRollCode = 0;
@@ -390,7 +354,6 @@ async function processRollCode(rollCode) {
 
   return {
     rollCode,
-    alreadyHad: alreadySavedForRollCode,
     newSaved: savedInThisRollCode
   };
 }
@@ -440,7 +403,7 @@ async function processRollCode(rollCode) {
   for (let i = 0; i < selectedRollCodes.length; i += ROLLCODE_PARALLEL) {
     const rollCodeChunk = selectedRollCodes.slice(i, i + ROLLCODE_PARALLEL);
 
-    const chunkResults = await Promise.all(
+    await Promise.all(
       rollCodeChunk.map(rollCode => processRollCode(rollCode))
     );
 
