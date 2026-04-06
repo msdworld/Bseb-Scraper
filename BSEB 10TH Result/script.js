@@ -8,11 +8,13 @@ const zlib = require("zlib");
 const API_URL = "https://resultapi.biharboardonline.org/result";
 
 const SCHOOL_LIST_FILE = "bseb-10th-school-list-2026.json";
+const SEEN_IDS_FILE = "bseb-10th-seen-rollnos.txt";
 
-// FILE 1 = OLD MASTER BACKUP (READ ONLY)
-const MASTER_GZ = "bseb-10th-full-result-2026.json.gz";
+// OLD MASTER FILE (READ ONLY)
+const MASTER_GZ_FILE = "bseb-10th-full-result-2026.json.gz";
 
-// FILE 2 = NEW SAVE FILE
+// NEW FILE FOR REMAINING DATA
+const OUTPUT_JSON = "bseb-10th-full-result-2026-2.json";
 const OUTPUT_GZ = "bseb-10th-full-result-2026-2.json.gz";
 
 // Roll number range per roll code
@@ -21,7 +23,7 @@ const ROLLNO_END = 2600999;
 
 // SPEED
 const ROLLCODE_PARALLEL = 10;
-const CONCURRENCY = 900;
+const CONCURRENCY = 200;
 const BATCH_SIZE = 100;
 const REQUEST_TIMEOUT = 5000;
 
@@ -31,7 +33,7 @@ const SAVE_EVERY_VALID_RESULTS = 100;
 // ===============================
 // SPLIT RANGE (CHANGE EACH RUN)
 // ===============================
-const START_INDEX = 6080;
+const START_INDEX = 6980;
 const END_INDEX = 7000;
 
 // ===============================
@@ -77,16 +79,10 @@ function tryLoadFromGZ(file) {
     const gzRaw = fs.readFileSync(file);
     const jsonRaw = zlib.gunzipSync(gzRaw).toString("utf8");
     return JSON.parse(jsonRaw);
-  } catch (err) {
-    console.log(`⚠️ GZ invalid (${file}): ${err.message}`);
+  } catch (e) {
+    console.log(`⚠️ GZ invalid (${file}): ${e.message}`);
     return {};
   }
-}
-
-function saveGZ(file, data) {
-  const jsonString = JSON.stringify(data);
-  const gz = zlib.gzipSync(jsonString, { level: 9 });
-  fs.writeFileSync(file, gz);
 }
 
 function loadSchoolRollCodes() {
@@ -104,12 +100,40 @@ function countTotalStudentsSaved(fullResults) {
   return total;
 }
 
-function studentExists(dataObj, rollCode, rollNo) {
-  return !!(dataObj[rollCode] && dataObj[rollCode][rollNo]);
+function compressJSONToGZ(jsonFile, gzFile) {
+  if (!fs.existsSync(jsonFile)) return;
+  const raw = fs.readFileSync(jsonFile);
+  const gz = zlib.gzipSync(raw, { level: 9 });
+  fs.writeFileSync(gzFile, gz);
+}
+
+function loadSeenIds() {
+  const seen = new Set();
+
+  if (!fs.existsSync(SEEN_IDS_FILE)) {
+    fs.writeFileSync(SEEN_IDS_FILE, "", "utf8");
+    return seen;
+  }
+
+  const lines = fs.readFileSync(SEEN_IDS_FILE, "utf8")
+    .split("\n")
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    seen.add(line);
+  }
+
+  return seen;
+}
+
+function appendSeenIds(ids) {
+  if (!ids.length) return;
+  fs.appendFileSync(SEEN_IDS_FILE, ids.join("\n") + "\n", "utf8");
 }
 
 // ===============================
-// SUBJECT FORMATTER
+// SUBJECT FORMATTER (ONE LINER)
 // ===============================
 function buildPractical(subject) {
   const projectWork = normalizeMarks(subject.project_work);
@@ -217,6 +241,14 @@ function formatStudent(data) {
 }
 
 // ===============================
+// SAVE JSON (SAFE FOR FILE 2)
+// ===============================
+function saveCustomJSON(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data), "utf8");
+  compressJSONToGZ(OUTPUT_JSON, OUTPUT_GZ);
+}
+
+// ===============================
 // FETCH ONE RESULT
 // ===============================
 async function fetchStudentResult(rollCode, rollNo) {
@@ -252,26 +284,25 @@ async function fetchStudentResult(rollCode, rollNo) {
 // GLOBAL STATE
 // ===============================
 const saveState = {
-  masterData: {},     // FILE 1 (READ ONLY)
-  currentData: {},    // FILE 2 (WRITE ONLY)
   masterTotal: 0,
-  currentTotal: 0,
+  file2Results: {},
+  file2Total: 0,
   combinedTotal: 0,
   unsavedValidCount: 0,
-  firstMasterStudent: null,
   firstThisRunStudent: null,
-  lastThisRunStudent: null
+  lastThisRunStudent: null,
+  seenIds: new Set(),
+  newSeenIdsBuffer: []
 };
 
 // ===============================
 // PROCESS ONE ROLL CODE
 // ===============================
 async function processRollCode(rollCode) {
-  if (!saveState.currentData[rollCode]) saveState.currentData[rollCode] = {};
-
-  let savedInThisRollCode = 0;
+  if (!saveState.file2Results[rollCode]) saveState.file2Results[rollCode] = {};
 
   let currentRollNo = ROLLNO_START;
+  let savedInThisRollCode = 0;
 
   while (currentRollNo <= ROLLNO_END) {
     const batchEnd = Math.min(currentRollNo + BATCH_SIZE - 1, ROLLNO_END);
@@ -291,37 +322,36 @@ async function processRollCode(rollCode) {
       for (let j = 0; j < chunk.length; j++) {
         const rn = chunk[j];
         const result = results[j];
+        const id = `${rollCode}-${rn}`;
 
-        if (!result.valid) continue;
+        if (result.valid) {
+          if (!saveState.seenIds.has(id)) {
+            saveState.seenIds.add(id);
+            saveState.newSeenIdsBuffer.push(id);
 
-        const rollNoStr = String(rn);
+            if (!saveState.file2Results[rollCode]) saveState.file2Results[rollCode] = {};
+            saveState.file2Results[rollCode][rn] = result.data;
 
-        // SKIP if already exists in MASTER FILE
-        if (studentExists(saveState.masterData, rollCode, rollNoStr)) {
-          continue;
+            saveState.unsavedValidCount++;
+            saveState.file2Total++;
+            saveState.combinedTotal++;
+            savedInThisRollCode++;
+
+            if (!saveState.firstThisRunStudent) {
+              saveState.firstThisRunStudent = result.data;
+            }
+
+            saveState.lastThisRunStudent = result.data;
+          }
         }
-
-        // SKIP if already exists in CURRENT FILE
-        if (studentExists(saveState.currentData, rollCode, rollNoStr)) {
-          continue;
-        }
-
-        saveState.currentData[rollCode][rollNoStr] = result.data;
-        saveState.currentTotal++;
-        saveState.combinedTotal++;
-        saveState.unsavedValidCount++;
-        savedInThisRollCode++;
-
-        if (!saveState.firstThisRunStudent) {
-          saveState.firstThisRunStudent = result.data;
-        }
-
-        saveState.lastThisRunStudent = result.data;
       }
 
       if (saveState.unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
-        saveGZ(OUTPUT_GZ, saveState.currentData);
-        console.log(`💾 Progress Auto-Saved | File2: ${saveState.currentTotal} | Combined: ${saveState.combinedTotal}`);
+        saveCustomJSON(OUTPUT_JSON, saveState.file2Results);
+        appendSeenIds(saveState.newSeenIdsBuffer);
+        saveState.newSeenIdsBuffer = [];
+
+        console.log(`💾 Progress Auto-Saved | File2: ${saveState.file2Total} | Combined: ${saveState.combinedTotal}`);
         saveState.unsavedValidCount = 0;
       }
     }
@@ -350,31 +380,29 @@ async function processRollCode(rollCode) {
     return;
   }
 
-  // LOAD MASTER FILE (OLD DATA)
-  saveState.masterData = tryLoadFromGZ(MASTER_GZ);
+  // MASTER TOTAL ONLY FOR DISPLAY
+  let masterData = tryLoadFromGZ(MASTER_GZ_FILE);
+  saveState.masterTotal = countTotalStudentsSaved(masterData);
 
-  // LOAD CURRENT FILE (NEW DATA)
-  saveState.currentData = tryLoadFromGZ(OUTPUT_GZ);
-
-  saveState.masterTotal = countTotalStudentsSaved(saveState.masterData);
-  saveState.currentTotal = countTotalStudentsSaved(saveState.currentData);
-  saveState.combinedTotal = saveState.masterTotal + saveState.currentTotal;
-  saveState.unsavedValidCount = 0;
-
-  // First student from MASTER file
-  const sortedMasterRollCodes = Object.keys(saveState.masterData).sort((a, b) => Number(a) - Number(b));
-  if (sortedMasterRollCodes.length) {
-    const firstRC = sortedMasterRollCodes[0];
-    const firstRN = Object.keys(saveState.masterData[firstRC]).sort((a, b) => Number(a) - Number(b))[0];
-    saveState.firstMasterStudent = saveState.masterData[firstRC][firstRN];
+  // FILE 2 LOAD
+  let file2Data = tryLoadFromGZ(OUTPUT_GZ);
+  if (!Object.keys(file2Data).length) {
+    file2Data = loadJSON(OUTPUT_JSON, {});
   }
+
+  saveState.file2Results = file2Data;
+  saveState.file2Total = countTotalStudentsSaved(file2Data);
+  saveState.combinedTotal = saveState.masterTotal + saveState.file2Total;
+
+  // SEEN IDS LOAD
+  saveState.seenIds = loadSeenIds();
 
   console.log(`🚀 BSEB 10TH FULL RESULT SCRAPER STARTED`);
   console.log(`📚 Total valid roll codes available: ${allRollCodes.length}`);
   console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
   console.log(`📦 Roll codes in this split: ${selectedRollCodes.length}`);
   console.log(`📁 File1 (Master) Total: ${saveState.masterTotal}`);
-  console.log(`📁 File2 (Current) Total: ${saveState.currentTotal}`);
+  console.log(`📁 File2 (Current) Total: ${saveState.file2Total}`);
   console.log(`📊 Combined Total Saved: ${saveState.combinedTotal}`);
   console.log(`⚡ Parallel Roll Codes: ${ROLLCODE_PARALLEL}`);
   console.log(`⚡ RollNo Concurrency per Roll Code: ${CONCURRENCY}`);
@@ -386,27 +414,26 @@ async function processRollCode(rollCode) {
       rollCodeChunk.map(rollCode => processRollCode(rollCode))
     );
 
-    saveGZ(OUTPUT_GZ, saveState.currentData);
+    saveCustomJSON(OUTPUT_JSON, saveState.file2Results);
+    appendSeenIds(saveState.newSeenIdsBuffer);
+    saveState.newSeenIdsBuffer = [];
     saveState.unsavedValidCount = 0;
 
-    console.log(
-      `💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | File2: ${saveState.currentTotal} | Combined: ${saveState.combinedTotal}`
-    );
+    console.log(`💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | File2: ${saveState.file2Total} | Combined: ${saveState.combinedTotal}`);
   }
 
-  saveGZ(OUTPUT_GZ, saveState.currentData);
+  saveCustomJSON(OUTPUT_JSON, saveState.file2Results);
+  appendSeenIds(saveState.newSeenIdsBuffer);
+  saveState.newSeenIdsBuffer = [];
 
   console.log(`🎉 SCRAPE COMPLETED`);
-  console.log(`📁 File1 (Master): ${saveState.masterTotal}`);
-  console.log(`📁 File2 (Current): ${saveState.currentTotal}`);
-  console.log(`📊 Combined Total: ${saveState.combinedTotal}`);
+  console.log(`📁 File1 Total: ${saveState.masterTotal}`);
+  console.log(`📁 File2 Total: ${saveState.file2Total}`);
+  console.log(`📊 Combined Total Saved: ${saveState.combinedTotal}`);
 
-  console.log(`\n===== FIRST SAVED STUDENT (FILE 1 MASTER) =====`);
-  console.log(JSON.stringify(saveState.firstMasterStudent || null, null, 2));
-
-  console.log(`\n===== FIRST SAVED STUDENT (THIS RUN / FILE 2) =====`);
+  console.log(`\n===== FIRST SAVED STUDENT (THIS RUN) =====`);
   console.log(JSON.stringify(saveState.firstThisRunStudent || null, null, 2));
 
-  console.log(`\n===== LAST SAVED STUDENT (THIS RUN / FILE 2) =====`);
+  console.log(`\n===== LAST SAVED STUDENT (THIS RUN) =====`);
   console.log(JSON.stringify(saveState.lastThisRunStudent || null, null, 2));
 })();
