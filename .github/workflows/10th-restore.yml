@@ -1,0 +1,49 @@
+name: Restore BSEB 10th Backup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  restore-backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show Current File Size Before Restore
+        run: |
+          echo "===== BEFORE RESTORE ====="
+          ls -lh bseb-10th-full-result-2026.json.gz || true
+          du -h bseb-10th-full-result-2026.json.gz || true
+
+      - name: Restore Old Valid Backup From Good Commit
+        run: |
+          git checkout 7519a2f -- bseb-10th-full-result-2026.json.gz
+
+      - name: Verify Restored File
+        run: |
+          echo "===== AFTER RESTORE ====="
+          ls -lh bseb-10th-full-result-2026.json.gz
+          du -h bseb-10th-full-result-2026.json.gz
+
+      - name: Commit Restored Backup
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add bseb-10th-full-result-2026.json.gz
+
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+
+          git commit -m "Restore valid BSEB 10th full result backup"
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Upload Restored Backup Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: restored-bseb-10th-backup
+          path: bseb-10th-full-result-2026.json.gz
