@@ -1,4 +1,4 @@
-name: BSEB 10th Full Result 2026
+name: BSEB 10th Remaining Result 2026
 
 on:
   workflow_dispatch:
@@ -27,171 +27,106 @@ jobs:
       - name: Install Dependencies
         run: npm install axios
 
-      - name: Download Previous Backup Artifact (if exists)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ARTIFACT_ID: 6269148355
+      - name: Check Main Master File
         run: |
-          set +e
-
-          echo "===== TRY DOWNLOADING OLD ARTIFACT ====="
-
-          curl -L \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip" \
-            -o artifact.zip
-
-          if [ -f artifact.zip ]; then
-            mkdir -p artifact_data
-            unzip -o artifact.zip -d artifact_data || true
-            find artifact_data -type f | sort || true
-
-            # FILE 1 restore
-            if [ -f "artifact_data/bseb-10th-full-result-2026.json.gz" ]; then
-              cp artifact_data/bseb-10th-full-result-2026.json.gz bseb-10th-full-result-2026.json.gz
-              echo "✅ Restored FILE 1 GZ from artifact"
-            fi
-
-            # FILE 2 restore
-            if [ -f "artifact_data/bseb-10th-full-result-2026-2.json.gz" ]; then
-              cp artifact_data/bseb-10th-full-result-2026-2.json.gz bseb-10th-full-result-2026-2.json.gz
-              echo "✅ Restored FILE 2 GZ from artifact"
-            fi
-
-            # fallback if nothing found
-            if [ ! -f "bseb-10th-full-result-2026.json.gz" ] && [ ! -f "bseb-10th-full-result-2026-2.json.gz" ]; then
-              echo "⚠️ No previous full-result backup found in artifact"
-            fi
-          else
-            echo "⚠️ No artifact downloaded"
-          fi
-
-      - name: Validate Previous Data (if exists)
-        run: |
-          node - <<'EOF'
-          const fs = require("fs");
-          const zlib = require("zlib");
-
-          function count(data) {
-            let total = 0;
-            for (const rc of Object.keys(data)) {
-              total += Object.keys(data[rc] || {}).length;
-            }
-            return total;
-          }
-
-          function validateGZ(file) {
-            if (!fs.existsSync(file)) return 0;
-            try {
-              const raw = fs.readFileSync(file);
-              const json = zlib.gunzipSync(raw).toString("utf8");
-              const data = JSON.parse(json);
-              const total = count(data);
-              console.log(`✅ Valid: ${file}`);
-              console.log(`🎓 Students in ${file}: ${total}`);
-              return total;
-            } catch (e) {
-              console.log(`⚠️ Invalid: ${file} -> ${e.message}`);
-              return 0;
-            }
-          }
-
-          const total1 = validateGZ("bseb-10th-full-result-2026.json.gz");
-          const total2 = validateGZ("bseb-10th-full-result-2026-2.json.gz");
-
-          console.log(`📦 Total previous students across both files: ${total1 + total2}`);
-
-          if (total1 === 0 && total2 === 0) {
-            console.log("⚠️ No valid previous data found. Fresh run will start.");
-          }
-          EOF
-
-      - name: Run Full Result Script
-        run: node "BSEB 10TH Result/script.js"
-
-      - name: Validate Final GZ Files
-        run: |
-          node - <<'EOF'
-          const fs = require("fs");
-          const zlib = require("zlib");
-
-          function count(data) {
-            let total = 0;
-            for (const rc of Object.keys(data)) {
-              total += Object.keys(data[rc] || {}).length;
-            }
-            return total;
-          }
-
-          function validateGZ(file) {
-            if (!fs.existsSync(file)) {
-              console.log(`⚠️ Missing: ${file}`);
-              return 0;
-            }
-
-            const raw = fs.readFileSync(file);
-            const unzipped = zlib.gunzipSync(raw).toString("utf8");
-            const data = JSON.parse(unzipped);
-            const total = count(data);
-
-            console.log(`✅ GZ valid: ${file}`);
-            console.log(`📚 Roll Codes in ${file}: ${Object.keys(data).length}`);
-            console.log(`🎓 Students in ${file}: ${total}`);
-
-            return total;
-          }
-
-          const total1 = validateGZ("bseb-10th-full-result-2026.json.gz");
-          const total2 = validateGZ("bseb-10th-full-result-2026-2.json.gz");
-
-          console.log(`📦 FINAL TOTAL STUDENTS ACROSS BOTH FILES: ${total1 + total2}`);
-          EOF
-
-      - name: Show File Size
-        if: always()
-        run: |
-          echo "===== FILE 1 GZ ====="
+          echo "===== CHECK MAIN GZ ====="
           ls -lh bseb-10th-full-result-2026.json.gz || true
           du -h bseb-10th-full-result-2026.json.gz || true
 
-          echo "===== FILE 2 GZ ====="
+      - name: Check Seen IDs File
+        run: |
+          echo "===== CHECK SEEN IDS FILE ====="
+          ls -lh bseb-10th-seen-rollnos.txt || true
+          du -h bseb-10th-seen-rollnos.txt || true
+          wc -l bseb-10th-seen-rollnos.txt || true
+
+      - name: Run Remaining Scraper
+        run: node "BSEB 10TH Result/script.js"
+
+      - name: Validate File2 GZ
+        run: |
+          node - <<'EOF'
+          const fs = require("fs");
+          const zlib = require("zlib");
+
+          function count(data) {
+            let total = 0;
+            for (const rc of Object.keys(data)) {
+              total += Object.keys(data[rc] || {}).length;
+            }
+            return total;
+          }
+
+          const gzFile = "bseb-10th-full-result-2026-2.json.gz";
+
+          if (!fs.existsSync(gzFile)) {
+            console.log("⚠️ File2 GZ not found yet");
+            process.exit(0);
+          }
+
+          try {
+            const gzRaw = fs.readFileSync(gzFile);
+            const unzipped = zlib.gunzipSync(gzRaw).toString("utf8");
+            const data = JSON.parse(unzipped);
+            console.log("✅ File2 GZ valid");
+            console.log("📚 Roll Codes:", Object.keys(data).length);
+            console.log("🎓 Students:", count(data));
+          } catch (e) {
+            console.error("❌ File2 GZ invalid:", e.message);
+            process.exit(1);
+          }
+          EOF
+
+      - name: Show File Sizes
+        if: always()
+        run: |
+          echo "===== MASTER GZ ====="
+          ls -lh bseb-10th-full-result-2026.json.gz || true
+          du -h bseb-10th-full-result-2026.json.gz || true
+
+          echo "===== FILE2 JSON ====="
+          ls -lh bseb-10th-full-result-2026-2.json || true
+          du -h bseb-10th-full-result-2026-2.json || true
+
+          echo "===== FILE2 GZ ====="
           ls -lh bseb-10th-full-result-2026-2.json.gz || true
           du -h bseb-10th-full-result-2026-2.json.gz || true
 
-      - name: Commit and Push Only GZ
+          echo "===== SEEN IDS ====="
+          ls -lh bseb-10th-seen-rollnos.txt || true
+          du -h bseb-10th-seen-rollnos.txt || true
+          wc -l bseb-10th-seen-rollnos.txt || true
+
+      - name: Commit and Push Safe Files
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # clean npm junk
           git restore package.json package-lock.json || true
-          rm -rf node_modules artifact.zip artifact_data || true
+          rm -rf node_modules || true
 
-          # never push raw JSON if generated
-          rm -f bseb-10th-full-result-2026.json || true
+          # Never push raw json
           rm -f bseb-10th-full-result-2026-2.json || true
 
-          # add only safe files
-          [ -f bseb-10th-full-result-2026.json.gz ] && git add bseb-10th-full-result-2026.json.gz
           [ -f bseb-10th-full-result-2026-2.json.gz ] && git add bseb-10th-full-result-2026-2.json.gz
+          [ -f bseb-10th-seen-rollnos.txt ] && git add bseb-10th-seen-rollnos.txt
+          [ -f bseb-10th-full-result-2026.json.gz ] && git add bseb-10th-full-result-2026.json.gz
           [ -f bseb-10th-school-list-2026.json ] && git add bseb-10th-school-list-2026.json
           [ -f "BSEB 10TH Result/script.js" ] && git add "BSEB 10TH Result/script.js"
+          [ -f ".github/workflows/bseb-10th-full-result.yml" ] && git add ".github/workflows/bseb-10th-full-result.yml"
 
           git status
+          git commit -m "Update BSEB 10th remaining result 2026" || echo "No changes to commit"
 
-          git commit -m "Update BSEB 10th full result 2026" || echo "No changes to commit"
-
-          git fetch origin main
-          git rebase origin/main || true
+          git pull --rebase origin main || true
           git push
 
-      - name: Upload Fresh Backup Artifact
+      - name: Upload Backup Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseb-10th-full-result-data
+          name: bseb-10th-remaining-result-data
           path: |
-            bseb-10th-full-result-2026.json.gz
             bseb-10th-full-result-2026-2.json.gz
+            bseb-10th-seen-rollnos.txt
