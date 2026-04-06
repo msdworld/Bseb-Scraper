@@ -17,6 +17,7 @@ jobs:
         with:
           lfs: false
           persist-credentials: true
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -46,13 +47,20 @@ jobs:
             unzip -o artifact.zip -d artifact_data || true
             find artifact_data -type f | sort || true
 
-            if [ -f "artifact_data/bseb-10th-full-result-2026.json" ]; then
-              cp artifact_data/bseb-10th-full-result-2026.json bseb-10th-full-result-2026.json
-              echo "✅ Restored previous JSON from artifact"
-            elif [ -f "artifact_data/bseb-10th-full-result-2026.json.gz" ]; then
+            # FILE 1 restore
+            if [ -f "artifact_data/bseb-10th-full-result-2026.json.gz" ]; then
               cp artifact_data/bseb-10th-full-result-2026.json.gz bseb-10th-full-result-2026.json.gz
-              echo "✅ Restored previous GZ from artifact"
-            else
+              echo "✅ Restored FILE 1 GZ from artifact"
+            fi
+
+            # FILE 2 restore
+            if [ -f "artifact_data/bseb-10th-full-result-2026-2.json.gz" ]; then
+              cp artifact_data/bseb-10th-full-result-2026-2.json.gz bseb-10th-full-result-2026-2.json.gz
+              echo "✅ Restored FILE 2 GZ from artifact"
+            fi
+
+            # fallback if nothing found
+            if [ ! -f "bseb-10th-full-result-2026.json.gz" ] && [ ! -f "bseb-10th-full-result-2026-2.json.gz" ]; then
               echo "⚠️ No previous full-result backup found in artifact"
             fi
           else
@@ -73,35 +81,36 @@ jobs:
             return total;
           }
 
-          if (fs.existsSync("bseb-10th-full-result-2026.json")) {
+          function validateGZ(file) {
+            if (!fs.existsSync(file)) return 0;
             try {
-              const data = JSON.parse(fs.readFileSync("bseb-10th-full-result-2026.json", "utf8"));
-              console.log("✅ Previous JSON valid");
-              console.log("🎓 Students:", count(data));
-              process.exit(0);
-            } catch {}
-          }
-
-          if (fs.existsSync("bseb-10th-full-result-2026.json.gz")) {
-            try {
-              const raw = fs.readFileSync("bseb-10th-full-result-2026.json.gz");
+              const raw = fs.readFileSync(file);
               const json = zlib.gunzipSync(raw).toString("utf8");
               const data = JSON.parse(json);
-              console.log("✅ Previous GZ valid");
-              console.log("🎓 Students:", count(data));
-              process.exit(0);
+              const total = count(data);
+              console.log(`✅ Valid: ${file}`);
+              console.log(`🎓 Students in ${file}: ${total}`);
+              return total;
             } catch (e) {
-              console.log("⚠️ GZ invalid:", e.message);
+              console.log(`⚠️ Invalid: ${file} -> ${e.message}`);
+              return 0;
             }
           }
 
-          console.log("⚠️ No valid previous data found. Fresh run will start.");
+          const total1 = validateGZ("bseb-10th-full-result-2026.json.gz");
+          const total2 = validateGZ("bseb-10th-full-result-2026-2.json.gz");
+
+          console.log(`📦 Total previous students across both files: ${total1 + total2}`);
+
+          if (total1 === 0 && total2 === 0) {
+            console.log("⚠️ No valid previous data found. Fresh run will start.");
+          }
           EOF
 
       - name: Run Full Result Script
         run: node "BSEB 10TH Result/script.js"
 
-      - name: Validate Final JSON + GZ
+      - name: Validate Final GZ Files
         run: |
           node - <<'EOF'
           const fs = require("fs");
@@ -115,50 +124,40 @@ jobs:
             return total;
           }
 
-          const jsonFile = "bseb-10th-full-result-2026.json";
-          const gzFile = "bseb-10th-full-result-2026.json.gz";
+          function validateGZ(file) {
+            if (!fs.existsSync(file)) {
+              console.log(`⚠️ Missing: ${file}`);
+              return 0;
+            }
 
-          if (!fs.existsSync(jsonFile)) {
-            console.error("❌ JSON file missing");
-            process.exit(1);
+            const raw = fs.readFileSync(file);
+            const unzipped = zlib.gunzipSync(raw).toString("utf8");
+            const data = JSON.parse(unzipped);
+            const total = count(data);
+
+            console.log(`✅ GZ valid: ${file}`);
+            console.log(`📚 Roll Codes in ${file}: ${Object.keys(data).length}`);
+            console.log(`🎓 Students in ${file}: ${total}`);
+
+            return total;
           }
 
-          if (!fs.existsSync(gzFile)) {
-            console.error("❌ GZ file missing");
-            process.exit(1);
-          }
+          const total1 = validateGZ("bseb-10th-full-result-2026.json.gz");
+          const total2 = validateGZ("bseb-10th-full-result-2026-2.json.gz");
 
-          const jsonData = JSON.parse(fs.readFileSync(jsonFile, "utf8"));
-          const jsonTotal = count(jsonData);
-
-          console.log("✅ JSON valid");
-          console.log("📚 Roll Codes:", Object.keys(jsonData).length);
-          console.log("🎓 Students:", jsonTotal);
-
-          const gzRaw = fs.readFileSync(gzFile);
-          const unzipped = zlib.gunzipSync(gzRaw).toString("utf8");
-          const gzData = JSON.parse(unzipped);
-          const gzTotal = count(gzData);
-
-          console.log("✅ GZ valid");
-          console.log("🎓 GZ Students:", gzTotal);
-
-          if (jsonTotal !== gzTotal) {
-            console.error("❌ JSON and GZ student count mismatch");
-            process.exit(1);
-          }
+          console.log(`📦 FINAL TOTAL STUDENTS ACROSS BOTH FILES: ${total1 + total2}`);
           EOF
 
       - name: Show File Size
         if: always()
         run: |
-          echo "===== JSON FILE SIZE ====="
-          ls -lh bseb-10th-full-result-2026.json || true
-          du -h bseb-10th-full-result-2026.json || true
-
-          echo "===== GZ FILE SIZE ====="
+          echo "===== FILE 1 GZ ====="
           ls -lh bseb-10th-full-result-2026.json.gz || true
           du -h bseb-10th-full-result-2026.json.gz || true
+
+          echo "===== FILE 2 GZ ====="
+          ls -lh bseb-10th-full-result-2026-2.json.gz || true
+          du -h bseb-10th-full-result-2026-2.json.gz || true
 
       - name: Commit and Push Only GZ
         if: always()
@@ -170,11 +169,13 @@ jobs:
           git restore package.json package-lock.json || true
           rm -rf node_modules artifact.zip artifact_data || true
 
-          # never push raw JSON
+          # never push raw JSON if generated
           rm -f bseb-10th-full-result-2026.json || true
+          rm -f bseb-10th-full-result-2026-2.json || true
 
           # add only safe files
           [ -f bseb-10th-full-result-2026.json.gz ] && git add bseb-10th-full-result-2026.json.gz
+          [ -f bseb-10th-full-result-2026-2.json.gz ] && git add bseb-10th-full-result-2026-2.json.gz
           [ -f bseb-10th-school-list-2026.json ] && git add bseb-10th-school-list-2026.json
           [ -f "BSEB 10TH Result/script.js" ] && git add "BSEB 10TH Result/script.js"
 
@@ -192,5 +193,5 @@ jobs:
         with:
           name: bseb-10th-full-result-data
           path: |
-            bseb-10th-full-result-2026.json
             bseb-10th-full-result-2026.json.gz
+            bseb-10th-full-result-2026-2.json.gz
