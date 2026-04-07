@@ -20,7 +20,7 @@ jobs:
       - name: Restore 12th Main GZ from specific commit
         run: |
           git fetch --all
-          git checkout 7519a2f -- bseb-12th-full-result-2026.json.gz || true
+          git checkout YOUR_GOOD_12TH_COMMIT_ID -- bseb-12th-full-result-2026.json.gz || true
 
       - name: Check Main GZ
         run: |
@@ -33,14 +33,13 @@ jobs:
         with:
           node-version: 20
 
-      - name: Extract rollCode-rollNo IDs (STREAM SAFE)
+      - name: Extract rollCode-rollNo IDs (Chunk Stream Safe)
         run: |
           echo "Extracting rollCode-rollNo IDs..."
 
           node - <<'EOF'
           const fs = require("fs");
           const zlib = require("zlib");
-          const readline = require("readline");
 
           const INPUT = "bseb-12th-full-result-2026.json.gz";
           const OUTPUT = "bseb-12th-seen-rollnos.txt";
@@ -52,54 +51,61 @@ jobs:
 
           const gunzip = zlib.createGunzip();
           const input = fs.createReadStream(INPUT);
-          const rl = readline.createInterface({
-            input: input.pipe(gunzip),
-            crlfDelay: Infinity
-          });
+          const output = fs.createWriteStream(OUTPUT, { flags: "w" });
 
-          const out = fs.createWriteStream(OUTPUT, { flags: "w" });
-
+          let buffer = "";
           let currentRollCode = null;
           let total = 0;
 
-          // Matches:
-          // "31320": {
-          const rollCodeRegex = /^\s*"(\d{5})"\s*:\s*\{$/;
+          input.pipe(gunzip);
 
-          // Matches:
-          // "2600057": {
-          const rollNoRegex = /^\s*"(\d{7})"\s*:\s*\{$/;
+          gunzip.on("data", (chunk) => {
+            buffer += chunk.toString("utf8");
 
-          rl.on("line", (line) => {
-            const rcMatch = line.match(rollCodeRegex);
-            if (rcMatch) {
-              currentRollCode = rcMatch[1];
-              return;
-            }
-
-            const rnMatch = line.match(rollNoRegex);
-            if (rnMatch && currentRollCode) {
-              out.write(`${currentRollCode}-${rnMatch[1]}\n`);
-              total++;
+            // Keep buffer from growing too large
+            if (buffer.length > 200000) {
+              processBuffer(false);
             }
           });
 
-          rl.on("close", () => {
-            out.end(() => {
+          gunzip.on("end", () => {
+            processBuffer(true);
+            output.end(() => {
               console.log("✅ Extraction complete");
               console.log(`📚 Total IDs Extracted: ${total}`);
             });
-          });
-
-          rl.on("error", (err) => {
-            console.error("❌ Read error:", err.message);
-            process.exit(1);
           });
 
           gunzip.on("error", (err) => {
             console.error("❌ Gunzip error:", err.message);
             process.exit(1);
           });
+
+          function processBuffer(isFinal) {
+            const safeLength = isFinal ? buffer.length : buffer.length - 500;
+            if (safeLength <= 0) return;
+
+            const text = buffer.slice(0, safeLength);
+            buffer = buffer.slice(safeLength);
+
+            // Match either:
+            // "31320":{
+            // or
+            // "2600057":{
+            const regex = /"(\d{5}|\d{7})"\s*:\s*\{/g;
+            let match;
+
+            while ((match = regex.exec(text)) !== null) {
+              const key = match[1];
+
+              if (key.length === 5) {
+                currentRollCode = key;
+              } else if (key.length === 7 && currentRollCode) {
+                output.write(`${currentRollCode}-${key}\n`);
+                total++;
+              }
+            }
+          }
           EOF
 
       - name: Show Extracted File Info
