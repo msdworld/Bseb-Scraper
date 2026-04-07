@@ -25,8 +25,8 @@ jobs:
       - name: Show Main GZ File
         run: |
           echo "===== CHECK MAIN GZ ====="
-          ls -lh bseb-12th-full-result-2025.json.gz || true
-          du -h bseb-12th-full-result-2025.json.gz || true
+          ls -lh bseb-12th-full-result-2026.json.gz || true
+          du -h bseb-12th-full-result-2026.json.gz || true
 
       - name: Extract rollCode-rollNo IDs from Main GZ
         run: |
@@ -34,7 +34,7 @@ jobs:
           const fs = require("fs");
           const zlib = require("zlib");
 
-          const INPUT_GZ = "bseb-12th-full-result-2025.json.gz";
+          const INPUT_GZ = "bseb-12th-full-result-2026.json.gz";
           const OUTPUT_TXT = "bseb-12th-seen-rollnos.txt";
 
           if (!fs.existsSync(INPUT_GZ)) {
