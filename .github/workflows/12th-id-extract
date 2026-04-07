@@ -1,0 +1,92 @@
+name: Extract 12th Seen RollNos
+
+on:
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Show Main GZ File
+        run: |
+          echo "===== CHECK MAIN GZ ====="
+          ls -lh bseb-12th-full-result-2025.json.gz || true
+          du -h bseb-12th-full-result-2025.json.gz || true
+
+      - name: Extract rollCode-rollNo IDs from Main GZ
+        run: |
+          node - <<'EOF'
+          const fs = require("fs");
+          const zlib = require("zlib");
+
+          const INPUT_GZ = "bseb-12th-full-result-2025.json.gz";
+          const OUTPUT_TXT = "bseb-12th-seen-rollnos.txt";
+
+          if (!fs.existsSync(INPUT_GZ)) {
+            console.error("❌ Main GZ file not found:", INPUT_GZ);
+            process.exit(1);
+          }
+
+          console.log("🔍 Extracting rollCode-rollNo IDs...");
+
+          const gzRaw = fs.readFileSync(INPUT_GZ);
+          const jsonRaw = zlib.gunzipSync(gzRaw).toString("utf8");
+
+          const seen = new Set();
+
+          const regex = /"rollCode"\s*:\s*"(\d+)"[\s\S]*?"rollNo"\s*:\s*"(\d+)"/g;
+          let match;
+
+          while ((match = regex.exec(jsonRaw)) !== null) {
+            const rollCode = match[1];
+            const rollNo = match[2];
+            seen.add(`${rollCode}-${rollNo}`);
+          }
+
+          fs.writeFileSync(OUTPUT_TXT, Array.from(seen).sort().join("\n") + "\n", "utf8");
+
+          console.log("✅ Extraction complete");
+          console.log("📚 Total IDs Extracted:", seen.size);
+          EOF
+
+      - name: Show Extracted TXT Info
+        run: |
+          echo "===== TOTAL IDS ====="
+          wc -l bseb-12th-seen-rollnos.txt || true
+
+          echo "===== FILE SIZE ====="
+          ls -lh bseb-12th-seen-rollnos.txt || true
+          du -h bseb-12th-seen-rollnos.txt || true
+
+          echo "===== FIRST 10 ====="
+          head -10 bseb-12th-seen-rollnos.txt || true
+
+          echo "===== LAST 10 ====="
+          tail -10 bseb-12th-seen-rollnos.txt || true
+
+      - name: Commit Seen IDs TXT
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add bseb-12th-seen-rollnos.txt
+          git commit -m "Extract 12th seen rollCode-rollNo IDs" || echo "No changes to commit"
+
+          git fetch origin main
+          git rebase origin/main || true
+          git push
