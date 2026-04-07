@@ -1,4 +1,4 @@
-name: Extract 12th Seen RollNos
+name: Extract BSEB 12th Seen IDs
 
 on:
   workflow_dispatch:
@@ -17,54 +17,92 @@ jobs:
         with:
           persist-credentials: true
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - name: Restore 12th Main GZ from specific commit
+        run: |
+          git fetch --all
+          git checkout 7519a2f -- bseb-12th-full-result-2026.json.gz || true
 
-      - name: Show Main GZ File
+      - name: Check Main GZ
         run: |
           echo "===== CHECK MAIN GZ ====="
           ls -lh bseb-12th-full-result-2026.json.gz || true
           du -h bseb-12th-full-result-2026.json.gz || true
 
-      - name: Extract rollCode-rollNo IDs from Main GZ
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Extract rollCode-rollNo IDs (STREAM SAFE)
         run: |
+          echo "Extracting rollCode-rollNo IDs..."
+
           node - <<'EOF'
           const fs = require("fs");
           const zlib = require("zlib");
+          const readline = require("readline");
 
-          const INPUT_GZ = "bseb-12th-full-result-2026.json.gz";
-          const OUTPUT_TXT = "bseb-12th-seen-rollnos.txt";
+          const INPUT = "bseb-12th-full-result-2026.json.gz";
+          const OUTPUT = "bseb-12th-seen-rollnos.txt";
 
-          if (!fs.existsSync(INPUT_GZ)) {
-            console.error("❌ Main GZ file not found:", INPUT_GZ);
+          if (!fs.existsSync(INPUT)) {
+            console.error("❌ Main GZ file not found");
             process.exit(1);
           }
 
-          console.log("🔍 Extracting rollCode-rollNo IDs...");
+          const gunzip = zlib.createGunzip();
+          const input = fs.createReadStream(INPUT);
+          const rl = readline.createInterface({
+            input: input.pipe(gunzip),
+            crlfDelay: Infinity
+          });
 
-          const gzRaw = fs.readFileSync(INPUT_GZ);
-          const jsonRaw = zlib.gunzipSync(gzRaw).toString("utf8");
+          const out = fs.createWriteStream(OUTPUT, { flags: "w" });
 
-          const seen = new Set();
+          let currentRollCode = null;
+          let total = 0;
 
-          const regex = /"rollCode"\s*:\s*"(\d+)"[\s\S]*?"rollNo"\s*:\s*"(\d+)"/g;
-          let match;
+          // Matches:
+          // "31320": {
+          const rollCodeRegex = /^\s*"(\d{5})"\s*:\s*\{$/;
 
-          while ((match = regex.exec(jsonRaw)) !== null) {
-            const rollCode = match[1];
-            const rollNo = match[2];
-            seen.add(`${rollCode}-${rollNo}`);
-          }
+          // Matches:
+          // "2600057": {
+          const rollNoRegex = /^\s*"(\d{7})"\s*:\s*\{$/;
 
-          fs.writeFileSync(OUTPUT_TXT, Array.from(seen).sort().join("\n") + "\n", "utf8");
+          rl.on("line", (line) => {
+            const rcMatch = line.match(rollCodeRegex);
+            if (rcMatch) {
+              currentRollCode = rcMatch[1];
+              return;
+            }
 
-          console.log("✅ Extraction complete");
-          console.log("📚 Total IDs Extracted:", seen.size);
+            const rnMatch = line.match(rollNoRegex);
+            if (rnMatch && currentRollCode) {
+              out.write(`${currentRollCode}-${rnMatch[1]}\n`);
+              total++;
+            }
+          });
+
+          rl.on("close", () => {
+            out.end(() => {
+              console.log("✅ Extraction complete");
+              console.log(`📚 Total IDs Extracted: ${total}`);
+            });
+          });
+
+          rl.on("error", (err) => {
+            console.error("❌ Read error:", err.message);
+            process.exit(1);
+          });
+
+          gunzip.on("error", (err) => {
+            console.error("❌ Gunzip error:", err.message);
+            process.exit(1);
+          });
           EOF
 
-      - name: Show Extracted TXT Info
+      - name: Show Extracted File Info
         run: |
           echo "===== TOTAL IDS ====="
           wc -l bseb-12th-seen-rollnos.txt || true
@@ -79,14 +117,12 @@ jobs:
           echo "===== LAST 10 ====="
           tail -10 bseb-12th-seen-rollnos.txt || true
 
-      - name: Commit Seen IDs TXT
+      - name: Commit Seen IDs File
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           git add bseb-12th-seen-rollnos.txt
-          git commit -m "Extract 12th seen rollCode-rollNo IDs" || echo "No changes to commit"
-
-          git fetch origin main
-          git rebase origin/main || true
+          git commit -m "Add BSEB 12th seen rollCode-rollNo IDs" || echo "No changes to commit"
+          git pull --rebase origin main || true
           git push
