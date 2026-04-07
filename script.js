@@ -7,7 +7,7 @@ const zlib = require("zlib");
 // ===============================
 const API_URL = "https://resultapi.biharboardonline.org/result";
 
-const SCHOOL_LIST_FILE = "bseb-12th-school-list-2026.json";
+const SCHOOL_LIST_FILE = "bseb-12th-college-list-2026.json";
 const SEEN_IDS_FILE = "bseb-12th-seen-rollnos.txt";
 
 const OUTPUT_JSON_2 = "bseb-12th-full-result-2026-2.json";
