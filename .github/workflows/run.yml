@@ -31,72 +31,97 @@ jobs:
           echo "===== INITIAL FILES ====="
           ls -lah
 
-      - name: Restore Real JSON from GZ
+      - name: Check Seen IDs File
         run: |
-          if [ -f bseb-12th-full-result-2026.json.gz ]; then
-            echo "===== RESTORING JSON FROM GZ ====="
-            gunzip -c bseb-12th-full-result-2026.json.gz > bseb-12th-full-result-2026.json
+          echo "===== CHECK SEEN IDS FILE ====="
+          ls -lh bseb-12th-seen-rollnos.txt || true
+          du -h bseb-12th-seen-rollnos.txt || true
+          wc -l bseb-12th-seen-rollnos.txt || true
+
+      - name: Restore File2 JSON from GZ (if exists)
+        run: |
+          if [ -f bseb-12th-full-result-2026-2.json.gz ]; then
+            echo "===== RESTORING FILE2 JSON FROM GZ ====="
+            gunzip -c bseb-12th-full-result-2026-2.json.gz > bseb-12th-full-result-2026-2.json
 
             node -e "
             const fs = require('fs');
-            const data = JSON.parse(fs.readFileSync('bseb-12th-full-result-2026.json', 'utf8'));
+            const data = JSON.parse(fs.readFileSync('bseb-12th-full-result-2026-2.json', 'utf8'));
             let total = 0;
             for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
-            console.log('✅ JSON valid');
+            console.log('✅ File2 JSON valid');
             console.log('📚 Roll Codes:', Object.keys(data).length);
-            console.log('🎓 Students:', total);
+            console.log('🎓 File2 Students:', total);
             "
           else
-            echo "⚠️ No GZ file found. Starting fresh."
-            echo "{}" > bseb-12th-full-result-2026.json
+            echo '⚠️ No File2 GZ found. Starting fresh.'
+            echo '{}' > bseb-12th-full-result-2026-2.json
           fi
 
       - name: Run Recheck Script
         run: node script.js
 
-      - name: Validate JSON Before Compress
+      - name: Validate File2 JSON Before Compress
         if: always()
         run: |
           node -e "
           const fs = require('fs');
-          const data = JSON.parse(fs.readFileSync('bseb-12th-full-result-2026.json', 'utf8'));
+          const file = 'bseb-12th-full-result-2026-2.json';
+          if (!fs.existsSync(file)) {
+            console.log('⚠️ File2 JSON not found');
+            process.exit(0);
+          }
+          const data = JSON.parse(fs.readFileSync(file, 'utf8'));
           let total = 0;
           for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
-          console.log('✅ JSON valid before commit');
+          console.log('✅ File2 JSON valid before commit');
           console.log('📚 Roll Codes:', Object.keys(data).length);
-          console.log('🎓 Students:', total);
+          console.log('🎓 File2 Students:', total);
           "
 
-      - name: Compress JSON to GZ
+      - name: Compress File2 JSON to GZ
         if: always()
         run: |
-          gzip -c bseb-12th-full-result-2026.json > bseb-12th-full-result-2026.json.gz
+          if [ -f bseb-12th-full-result-2026-2.json ]; then
+            gzip -c bseb-12th-full-result-2026-2.json > bseb-12th-full-result-2026-2.json.gz
+          fi
 
-      - name: Validate GZ
+      - name: Validate File2 GZ
         if: always()
         run: |
-          gunzip -c bseb-12th-full-result-2026.json.gz > test.json
+          if [ -f bseb-12th-full-result-2026-2.json.gz ]; then
+            gunzip -c bseb-12th-full-result-2026-2.json.gz > test.json
 
-          node -e "
-          const fs = require('fs');
-          const data = JSON.parse(fs.readFileSync('test.json', 'utf8'));
-          let total = 0;
-          for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
-          console.log('✅ GZ valid before commit');
-          console.log('🎓 GZ Students:', total);
-          "
+            node -e "
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('test.json', 'utf8'));
+            let total = 0;
+            for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
+            console.log('✅ File2 GZ valid before commit');
+            console.log('🎓 File2 GZ Students:', total);
+            "
 
-          rm -f test.json
+            rm -f test.json
+          else
+            echo "⚠️ File2 GZ not found"
+          fi
 
       - name: Show Final Files
         if: always()
         run: |
           echo "===== FINAL FILES ====="
           ls -lah
-          echo "===== JSON FILE SIZE ====="
-          du -h bseb-12th-full-result-2026.json || true
-          echo "===== GZ FILE SIZE ====="
-          du -h bseb-12th-full-result-2026.json.gz || true
+
+          echo "===== FILE2 JSON FILE SIZE ====="
+          du -h bseb-12th-full-result-2026-2.json || true
+
+          echo "===== FILE2 GZ FILE SIZE ====="
+          du -h bseb-12th-full-result-2026-2.json.gz || true
+
+          echo "===== SEEN IDS FILE SIZE ====="
+          du -h bseb-12th-seen-rollnos.txt || true
+          wc -l bseb-12th-seen-rollnos.txt || true
+
           echo "===== PROGRESS ====="
           cat progress.txt || true
 
@@ -106,12 +131,13 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Never push raw JSON (>100MB)
-          git restore --staged bseb-12th-full-result-2026.json || true
-          git checkout -- bseb-12th-full-result-2026.json || true
-          rm -f bseb-12th-full-result-2026.json || true
+          # Never push raw JSON
+          git restore --staged bseb-12th-full-result-2026-2.json || true
+          git checkout -- bseb-12th-full-result-2026-2.json || true
+          rm -f bseb-12th-full-result-2026-2.json || true
 
-          [ -f bseb-12th-full-result-2026.json.gz ] && git add bseb-12th-full-result-2026.json.gz
+          [ -f bseb-12th-full-result-2026-2.json.gz ] && git add bseb-12th-full-result-2026-2.json.gz
+          [ -f bseb-12th-seen-rollnos.txt ] && git add bseb-12th-seen-rollnos.txt
           [ -f progress.txt ] && git add progress.txt
           [ -f script.js ] && git add script.js
           [ -f .github/workflows/recheck.yml ] && git add .github/workflows/recheck.yml
@@ -128,5 +154,6 @@ jobs:
         with:
           name: bseb-recheck-backup
           path: |
-            bseb-12th-full-result-2026.json.gz
+            bseb-12th-full-result-2026-2.json.gz
+            bseb-12th-seen-rollnos.txt
             progress.txt
