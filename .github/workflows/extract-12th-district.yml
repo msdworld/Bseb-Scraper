@@ -52,8 +52,8 @@ jobs:
           BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
 
           # CHANGE THESE EACH TIME
-          DISTRICT_PREFIX = "13"
-          DISTRICT_NAME = "arabhojpur"
+          DISTRICT_PREFIX = "14"
+          DISTRICT_NAME = "buxar"
 
           OUTPUT_JSON = os.path.join(
               BASE_DIR,
@@ -148,7 +148,7 @@ jobs:
           import json
 
           BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
-          file = os.path.join(BASE_DIR, "{DISTRICT_NAME}-{DISTRICT_PREFIX}-bseb-12th-full-result-2026.json")
+          file = os.path.join(BASE_DIR, f"{DISTRICT_NAME}-{DISTRICT_PREFIX}-bseb-12th-full-result-2026.json")
 
           if not os.path.exists(file):
               print("❌ Extracted district file not found")
