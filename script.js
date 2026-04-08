@@ -7,18 +7,17 @@ const zlib = require("zlib");
 // ===============================
 const API_URL = "https://resultapi.biharboardonline.org/result";
 
-const SCHOOL_LIST_FILE = "bseb-12th-college-list-2026.json";
-const SEEN_IDS_FILE = "bseb-12th-seen-rollnos.txt";
+const SCHOOL_LIST_FILE = "bseb-10th-school-list-2026.json";
+const FILE2_JSON = "bseb-10th-full-result-2026-2.json";
+const FILE2_GZ = "bseb-10th-full-result-2026-2.json.gz";
+const SEEN_FILE = "bseb-10th-seen-rollnos.txt";
 
-const OUTPUT_JSON_2 = "bseb-12th-full-result-2026-2.json";
-const OUTPUT_GZ_2 = "bseb-12th-full-result-2026-2.json.gz";
-
-// Adjust according to 12th exam roll number pattern
-const ROLLNO_START = 2500001;
-const ROLLNO_END = 2500999;
+// Roll number range per roll code
+const ROLLNO_START = 2600001;
+const ROLLNO_END = 2600999;
 
 // SPEED
-const ROLLCODE_PARALLEL = 20;
+const ROLLCODE_PARALLEL = 10;
 const CONCURRENCY = 200;
 const BATCH_SIZE = 100;
 const REQUEST_TIMEOUT = 5000;
@@ -29,8 +28,8 @@ const SAVE_EVERY_VALID_RESULTS = 100;
 // ===============================
 // SPLIT RANGE (CHANGE EACH RUN)
 // ===============================
-const START_INDEX = 5001;
-const END_INDEX = 8000;
+const START_INDEX = 7000;
+const END_INDEX = 7050;
 
 // ===============================
 // AXIOS CLIENT
@@ -41,8 +40,8 @@ const client = axios.create({
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept": "application/json,text/plain,*/*",
-    "Referer": "https://results.biharboardonline.com/",
-    "Origin": "https://results.biharboardonline.com"
+    "Referer": "https://result.biharboardonline.org/",
+    "Origin": "https://result.biharboardonline.org"
   }
 });
 
@@ -57,8 +56,7 @@ function normalizeMarks(val) {
   if (val === null || val === undefined) return "";
   const str = String(val).trim();
   if (!str) return "";
-  const num = Number(str);
-  return Number.isNaN(num) ? str : String(num);
+  return String(Number(str));
 }
 
 function loadJSON(file, fallback = {}) {
@@ -104,21 +102,17 @@ function compressJSONToGZ(jsonFile, gzFile) {
   fs.writeFileSync(gzFile, gz);
 }
 
-function loadSeenIds() {
-  const set = new Set();
-  if (!fs.existsSync(SEEN_IDS_FILE)) return set;
-
-  const lines = fs.readFileSync(SEEN_IDS_FILE, "utf8").split("\n");
-  for (const line of lines) {
-    const id = line.trim();
-    if (id) set.add(id);
-  }
-  return set;
+function loadSeenRollNos() {
+  if (!fs.existsSync(SEEN_FILE)) return new Set();
+  const lines = fs.readFileSync(SEEN_FILE, "utf8")
+    .split(/\r?\n/)
+    .map(x => x.trim())
+    .filter(Boolean);
+  return new Set(lines);
 }
 
-function appendSeenIds(ids) {
-  if (!ids.length) return;
-  fs.appendFileSync(SEEN_IDS_FILE, ids.join("\n") + "\n", "utf8");
+function appendSeenId(id) {
+  fs.appendFileSync(SEEN_FILE, id + "\n");
 }
 
 // ===============================
@@ -230,11 +224,11 @@ function formatStudent(data) {
 }
 
 // ===============================
-// SAVE JSON
+// SAVE FILE2
 // ===============================
-function saveCustomJSON(file, data, gzFile) {
+function saveFile2JSON(file, data) {
   fs.writeFileSync(file, JSON.stringify(data), "utf8");
-  compressJSONToGZ(file, gzFile);
+  compressJSONToGZ(FILE2_JSON, FILE2_GZ);
 }
 
 // ===============================
@@ -272,15 +266,15 @@ async function fetchStudentResult(rollCode, rollNo) {
 // ===============================
 // GLOBAL STATE
 // ===============================
+const seenRollNos = loadSeenRollNos();
+
 const saveState = {
   file2Results: {},
-  seenIds: new Set(),
-  totalSeenBefore: 0,
-  totalFile2Saved: 0,
+  file2Total: 0,
+  combinedTotal: seenRollNos.size,
   unsavedValidCount: 0,
   firstThisRunStudent: null,
-  lastThisRunStudent: null,
-  newSeenBuffer: []
+  lastThisRunStudent: null
 };
 
 // ===============================
@@ -291,12 +285,21 @@ async function processRollCode(rollCode) {
 
   let currentRollNo = ROLLNO_START;
   let savedInThisRollCode = 0;
+  let skippedSeen = 0;
 
   while (currentRollNo <= ROLLNO_END) {
     const batchEnd = Math.min(currentRollNo + BATCH_SIZE - 1, ROLLNO_END);
     const batchRollNos = [];
 
+    // IMPORTANT: SKIP ALREADY SEEN BEFORE REQUEST
     for (let rn = currentRollNo; rn <= batchEnd; rn++) {
+      const id = `${rollCode}-${rn}`;
+
+      if (seenRollNos.has(id)) {
+        skippedSeen++;
+        continue;
+      }
+
       batchRollNos.push(rn);
     }
 
@@ -312,30 +315,32 @@ async function processRollCode(rollCode) {
         const result = results[j];
         const id = `${rollCode}-${rn}`;
 
-        if (saveState.seenIds.has(id)) continue;
-
         if (result.valid) {
-          saveState.file2Results[rollCode][rn] = result.data;
-          saveState.seenIds.add(id);
-          saveState.newSeenBuffer.push(id);
-          saveState.unsavedValidCount++;
-          saveState.totalFile2Saved++;
-          savedInThisRollCode++;
+          // DOUBLE SAFETY AGAINST DUPLICATE SAVE
+          if (!seenRollNos.has(id)) {
+            if (!saveState.file2Results[rollCode][rn]) {
+              saveState.file2Results[rollCode][rn] = result.data;
+              seenRollNos.add(id);
+              appendSeenId(id);
 
-          if (!saveState.firstThisRunStudent) {
-            saveState.firstThisRunStudent = result.data;
+              saveState.unsavedValidCount++;
+              saveState.file2Total++;
+              saveState.combinedTotal++;
+              savedInThisRollCode++;
+
+              if (!saveState.firstThisRunStudent) {
+                saveState.firstThisRunStudent = result.data;
+              }
+
+              saveState.lastThisRunStudent = result.data;
+            }
           }
-
-          saveState.lastThisRunStudent = result.data;
         }
       }
 
       if (saveState.unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
-        saveCustomJSON(OUTPUT_JSON_2, saveState.file2Results, OUTPUT_GZ_2);
-        appendSeenIds(saveState.newSeenBuffer);
-        saveState.newSeenBuffer = [];
-
-        console.log(`💾 Progress Saved | File2: ${saveState.totalFile2Saved} | Combined: ${saveState.totalSeenBefore + saveState.totalFile2Saved}`);
+        saveFile2JSON(FILE2_JSON, saveState.file2Results);
+        console.log(`💾 Progress Auto-Saved | File2: ${saveState.file2Total} | Combined: ${saveState.combinedTotal}`);
         saveState.unsavedValidCount = 0;
       }
     }
@@ -343,7 +348,7 @@ async function processRollCode(rollCode) {
     currentRollNo = batchEnd + 1;
   }
 
-  console.log(`${rollCode}-${savedInThisRollCode} student saved`);
+  console.log(`${rollCode}-${savedInThisRollCode} student saved | skipped seen: ${skippedSeen}`);
 }
 
 // ===============================
@@ -364,25 +369,24 @@ async function processRollCode(rollCode) {
     return;
   }
 
-  let loadedFile2 = tryLoadFromGZ(OUTPUT_GZ_2);
+  let loadedFile2 = tryLoadFromGZ(FILE2_GZ);
   if (!Object.keys(loadedFile2).length) {
-    loadedFile2 = loadJSON(OUTPUT_JSON_2, {});
+    loadedFile2 = loadJSON(FILE2_JSON, {});
   }
 
   saveState.file2Results = loadedFile2;
-  saveState.totalFile2Saved = countTotalStudentsSaved(saveState.file2Results);
+  saveState.file2Total = countTotalStudentsSaved(saveState.file2Results);
 
-  saveState.seenIds = loadSeenIds();
-  saveState.totalSeenBefore = saveState.seenIds.size;
-  saveState.unsavedValidCount = 0;
+  // IMPORTANT: combined total = old seen IDs + current file2 loaded
+  // But seen file already includes file2 previous IDs too if saved before
+  saveState.combinedTotal = seenRollNos.size;
 
-  console.log(`🚀 BSEB 12TH FULL RESULT SCRAPER STARTED`);
+  console.log(`🚀 BSEB 10TH FULL RESULT SCRAPER STARTED`);
   console.log(`📚 Total valid roll codes available: ${allRollCodes.length}`);
   console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
   console.log(`📦 Roll codes in this split: ${selectedRollCodes.length}`);
-  console.log(`📚 Seen IDs Loaded: ${saveState.totalSeenBefore}`);
-  console.log(`📁 File2 Current Total: ${saveState.totalFile2Saved}`);
-  console.log(`📊 Estimated Covered Total: ${saveState.totalSeenBefore + saveState.totalFile2Saved}`);
+  console.log(`📁 File2 (Current) Total: ${saveState.file2Total}`);
+  console.log(`📊 Combined Total Saved: ${saveState.combinedTotal}`);
   console.log(`⚡ Parallel Roll Codes: ${ROLLCODE_PARALLEL}`);
   console.log(`⚡ RollNo Concurrency per Roll Code: ${CONCURRENCY}`);
 
@@ -393,28 +397,17 @@ async function processRollCode(rollCode) {
       rollCodeChunk.map(rollCode => processRollCode(rollCode))
     );
 
-    saveCustomJSON(OUTPUT_JSON_2, saveState.file2Results, OUTPUT_GZ_2);
-
-    if (saveState.newSeenBuffer.length) {
-      appendSeenIds(saveState.newSeenBuffer);
-      saveState.newSeenBuffer = [];
-    }
-
+    saveFile2JSON(FILE2_JSON, saveState.file2Results);
     saveState.unsavedValidCount = 0;
 
-    console.log(`💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | File2: ${saveState.totalFile2Saved} | Combined: ${saveState.totalSeenBefore + saveState.totalFile2Saved}`);
+    console.log(`💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | File2: ${saveState.file2Total} | Combined: ${saveState.combinedTotal}`);
   }
 
-  saveCustomJSON(OUTPUT_JSON_2, saveState.file2Results, OUTPUT_GZ_2);
-
-  if (saveState.newSeenBuffer.length) {
-    appendSeenIds(saveState.newSeenBuffer);
-    saveState.newSeenBuffer = [];
-  }
+  saveFile2JSON(FILE2_JSON, saveState.file2Results);
 
   console.log(`🎉 SCRAPE COMPLETED`);
-  console.log(`📁 File2 Total: ${saveState.totalFile2Saved}`);
-  console.log(`📊 Estimated Covered Total: ${saveState.totalSeenBefore + saveState.totalFile2Saved}`);
+  console.log(`📁 File2 Total: ${saveState.file2Total}`);
+  console.log(`📊 Combined Total Saved: ${saveState.combinedTotal}`);
 
   console.log(`\n===== FIRST SAVED STUDENT (THIS RUN) =====`);
   console.log(JSON.stringify(saveState.firstThisRunStudent || null, null, 2));
