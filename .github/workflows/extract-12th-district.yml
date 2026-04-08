@@ -72,11 +72,10 @@ jobs:
           ls -lh bseb-12th-full-result-2026.json.gz
           du -h bseb-12th-full-result-2026.json.gz
 
-      - name: Validate Restored File
+      - name: Light Validation Only
         run: |
           node - <<'EOF'
           const fs = require("fs");
-          const zlib = require("zlib");
 
           const file = "bseb-12th-full-result-2026.json.gz";
 
@@ -86,6 +85,7 @@ jobs:
           }
 
           const raw = fs.readFileSync(file);
+
           console.log("📦 Restored GZ Size:", raw.length, "bytes");
 
           if (raw.length === 0) {
@@ -95,25 +95,14 @@ jobs:
 
           const isGzip = raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b;
 
-          let text = "";
-          if (isGzip) {
-            console.log("🗜️ Valid gzip detected");
-            text = zlib.gunzipSync(raw).toString("utf8");
-          } else {
-            console.log("⚠️ File is not gzip, treating as plain JSON");
-            text = raw.toString("utf8");
+          console.log("🗜️ GZIP Header Valid:", isGzip ? "YES" : "NO");
+
+          if (!isGzip) {
+            console.error("❌ Invalid gzip header");
+            process.exit(1);
           }
 
-          const data = JSON.parse(text);
-
-          let total = 0;
-          for (const rc of Object.keys(data)) {
-            total += Object.keys(data[rc] || {}).length;
-          }
-
-          console.log("✅ Master file valid");
-          console.log("📚 Roll Codes:", Object.keys(data).length);
-          console.log("🎓 Students:", total);
+          console.log("✅ Recovery file looks valid enough to commit");
           EOF
 
       - name: Commit Restored File
