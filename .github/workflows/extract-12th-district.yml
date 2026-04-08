@@ -44,7 +44,6 @@ jobs:
           const zlib = require("zlib");
           const { pipeline } = require("stream");
           const { parser } = require("stream-json");
-          const { pick } = require("stream-json/filters/Pick");
           const { streamObject } = require("stream-json/streamers/StreamObject");
 
           // =========================
@@ -99,14 +98,6 @@ jobs:
             fs.writeFileSync(file, lines.join("\n"), "utf8");
           }
 
-          function countStudents(data) {
-            let total = 0;
-            for (const rc of Object.keys(data)) {
-              total += Object.keys(data[rc] || {}).length;
-            }
-            return total;
-          }
-
           // =========================
           // START
           // =========================
@@ -126,8 +117,6 @@ jobs:
           let matchedRollCodes = 0;
           let extractedStudents = 0;
 
-          const gunzip = zlib.createGunzip();
-          const jsonParser = parser();
           const objectStreamer = streamObject();
 
           objectStreamer.on("data", ({ key, value }) => {
@@ -163,8 +152,8 @@ jobs:
 
           pipeline(
             fs.createReadStream(MASTER_GZ),
-            gunzip,
-            jsonParser,
+            zlib.createGunzip(),
+            parser(),
             objectStreamer,
             (err) => {
               if (err) {
