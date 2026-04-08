@@ -52,8 +52,8 @@ jobs:
           BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
 
           # CHANGE THESE EACH TIME
-          DISTRICT_PREFIX = "11"
-          DISTRICT_NAME = "patna"
+          DISTRICT_PREFIX = "12"
+          DISTRICT_NAME = "nalanda"
 
           OUTPUT_JSON = os.path.join(
               BASE_DIR,
