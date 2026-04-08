@@ -1,10 +1,10 @@
-name: BSEB Full Recheck
+name: BSEB 12th Remaining Result 2026
 
 on:
   workflow_dispatch:
 
 jobs:
-  recheck:
+  scrape:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -17,6 +17,7 @@ jobs:
         with:
           persist-credentials: true
           lfs: false
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -24,87 +25,117 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: npm install
+        run: npm install axios
 
       - name: Show Initial Files
         run: |
           echo "===== INITIAL FILES ====="
           ls -lah
 
-      - name: Check Seen IDs File
+      - name: Ensure Required Files Exist
+        run: |
+          [ -f bseb-12th-seen-rollnos.txt ] || touch bseb-12th-seen-rollnos.txt
+          [ -f bseb-12th-full-result-2026-2.json ] || echo "{}" > bseb-12th-full-result-2026-2.json
+
+      - name: Restore File2 JSON from GZ if Available
+        run: |
+          if [ -f bseb-12th-full-result-2026-2.json.gz ]; then
+            echo "===== RESTORING FILE2 JSON FROM GZ ====="
+            gunzip -c bseb-12th-full-result-2026-2.json.gz > bseb-12th-full-result-2026-2.json || echo "{}" > bseb-12th-full-result-2026-2.json
+          else
+            echo "⚠️ No File2 GZ found. Starting fresh File2."
+            echo "{}" > bseb-12th-full-result-2026-2.json
+          fi
+
+      - name: Validate Seen IDs + File2
         run: |
           echo "===== CHECK SEEN IDS FILE ====="
           ls -lh bseb-12th-seen-rollnos.txt || true
           du -h bseb-12th-seen-rollnos.txt || true
           wc -l bseb-12th-seen-rollnos.txt || true
 
-      - name: Restore File2 JSON from GZ (if exists)
-        run: |
-          if [ -f bseb-12th-full-result-2026-2.json.gz ]; then
-            echo "===== RESTORING FILE2 JSON FROM GZ ====="
-            gunzip -c bseb-12th-full-result-2026-2.json.gz > bseb-12th-full-result-2026-2.json
+          echo "===== CHECK FILE2 ====="
+          ls -lh bseb-12th-full-result-2026-2.json || true
+          du -h bseb-12th-full-result-2026-2.json || true
 
-            node -e "
-            const fs = require('fs');
-            const data = JSON.parse(fs.readFileSync('bseb-12th-full-result-2026-2.json', 'utf8'));
+          node - <<'EOF'
+          const fs = require("fs");
+
+          function count(data) {
             let total = 0;
-            for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
-            console.log('✅ File2 JSON valid');
-            console.log('📚 Roll Codes:', Object.keys(data).length);
-            console.log('🎓 File2 Students:', total);
-            "
-          else
-            echo '⚠️ No File2 GZ found. Starting fresh.'
-            echo '{}' > bseb-12th-full-result-2026-2.json
-          fi
+            for (const rc of Object.keys(data)) {
+              total += Object.keys(data[rc] || {}).length;
+            }
+            return total;
+          }
 
-      - name: Run Recheck Script
+          try {
+            const data = JSON.parse(fs.readFileSync("bseb-12th-full-result-2026-2.json", "utf8"));
+            console.log("✅ File2 JSON valid");
+            console.log("🎓 File2 Students:", count(data));
+          } catch (e) {
+            console.log("❌ File2 invalid:", e.message);
+            process.exit(1);
+          }
+          EOF
+
+      - name: Run 12th Script
         run: node script.js
 
-      - name: Validate File2 JSON Before Compress
+      - name: Validate Final File2 JSON
         if: always()
         run: |
-          node -e "
-          const fs = require('fs');
-          const file = 'bseb-12th-full-result-2026-2.json';
-          if (!fs.existsSync(file)) {
-            console.log('⚠️ File2 JSON not found');
-            process.exit(0);
+          node - <<'EOF'
+          const fs = require("fs");
+
+          function count(data) {
+            let total = 0;
+            for (const rc of Object.keys(data)) {
+              total += Object.keys(data[rc] || {}).length;
+            }
+            return total;
           }
-          const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-          let total = 0;
-          for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
-          console.log('✅ File2 JSON valid before commit');
-          console.log('📚 Roll Codes:', Object.keys(data).length);
-          console.log('🎓 File2 Students:', total);
-          "
+
+          const file = "bseb-12th-full-result-2026-2.json";
+
+          if (!fs.existsSync(file)) {
+            console.error("❌ File2 JSON missing");
+            process.exit(1);
+          }
+
+          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+          console.log("✅ Final File2 JSON valid");
+          console.log("📚 Roll Codes:", Object.keys(data).length);
+          console.log("🎓 Students:", count(data));
+          EOF
 
       - name: Compress File2 JSON to GZ
         if: always()
         run: |
-          if [ -f bseb-12th-full-result-2026-2.json ]; then
-            gzip -c bseb-12th-full-result-2026-2.json > bseb-12th-full-result-2026-2.json.gz
-          fi
+          gzip -c bseb-12th-full-result-2026-2.json > bseb-12th-full-result-2026-2.json.gz
 
       - name: Validate File2 GZ
         if: always()
         run: |
-          if [ -f bseb-12th-full-result-2026-2.json.gz ]; then
-            gunzip -c bseb-12th-full-result-2026-2.json.gz > test.json
+          gunzip -c bseb-12th-full-result-2026-2.json.gz > test.json
 
-            node -e "
-            const fs = require('fs');
-            const data = JSON.parse(fs.readFileSync('test.json', 'utf8'));
+          node - <<'EOF'
+          const fs = require("fs");
+
+          function count(data) {
             let total = 0;
-            for (const rc of Object.keys(data)) total += Object.keys(data[rc] || {}).length;
-            console.log('✅ File2 GZ valid before commit');
-            console.log('🎓 File2 GZ Students:', total);
-            "
+            for (const rc of Object.keys(data)) {
+              total += Object.keys(data[rc] || {}).length;
+            }
+            return total;
+          }
 
-            rm -f test.json
-          else
-            echo "⚠️ File2 GZ not found"
-          fi
+          const data = JSON.parse(fs.readFileSync("test.json", "utf8"));
+          console.log("✅ File2 GZ valid");
+          console.log("🎓 GZ Students:", count(data));
+          EOF
+
+          rm -f test.json
 
       - name: Show Final Files
         if: always()
@@ -112,28 +143,25 @@ jobs:
           echo "===== FINAL FILES ====="
           ls -lah
 
-          echo "===== FILE2 JSON FILE SIZE ====="
+          echo "===== FILE2 JSON SIZE ====="
           du -h bseb-12th-full-result-2026-2.json || true
 
-          echo "===== FILE2 GZ FILE SIZE ====="
+          echo "===== FILE2 GZ SIZE ====="
           du -h bseb-12th-full-result-2026-2.json.gz || true
 
-          echo "===== SEEN IDS FILE SIZE ====="
-          du -h bseb-12th-seen-rollnos.txt || true
+          echo "===== SEEN IDS ====="
           wc -l bseb-12th-seen-rollnos.txt || true
 
           echo "===== PROGRESS ====="
           cat progress.txt || true
 
-      - name: Commit and Push Results
+      - name: Commit and Push
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Never push raw JSON
-          git restore --staged bseb-12th-full-result-2026-2.json || true
-          git checkout -- bseb-12th-full-result-2026-2.json || true
+          # never push raw json
           rm -f bseb-12th-full-result-2026-2.json || true
 
           [ -f bseb-12th-full-result-2026-2.json.gz ] && git add bseb-12th-full-result-2026-2.json.gz
@@ -144,15 +172,16 @@ jobs:
 
           git status
 
-          git commit -m "Update BSEB recheck data" || echo "No changes to commit"
-          git pull --rebase origin main || true
-          git push
+          git commit -m "Update BSEB 12th remaining result 2026" || echo "No changes to commit"
+
+          # IMPORTANT: no rebase, no pull, no conflict mess
+          git push origin HEAD:main
 
       - name: Upload Backup Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseb-recheck-backup
+          name: bseb-12th-remaining-result-data
           path: |
             bseb-12th-full-result-2026-2.json.gz
             bseb-12th-seen-rollnos.txt
