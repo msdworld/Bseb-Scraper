@@ -53,16 +53,16 @@ jobs:
           # EDIT ONLY THIS LIST WHEN NEEDED
           # =========================================
           DISTRICTS = [
-            ("16", "kaimurbhabua"),
-            ("17", "patna2"),
-            ("21", "gaya"),
-            ("22", "jahanabad"),
-            ("23", "nawadah"),
-            ("24", "aurangabad"),
-            ("25", "arwal"),
-            ("31", "muzaffarpur"),
-            ("32", "sitamarhi"),
-            ("33", "vaishali"),
+            ("34", "eastchamparan"),
+            ("35", "westchamparan"),
+            ("36", "sheohar"),
+            ("41", "saran"),
+            ("42", "siwan"),
+            ("43", "gopalganj"),
+            ("51", "darbhanga"),
+            ("52", "madhubani"),
+            ("53", "samastipur"),
+            ("61", "saharsa"),
           ]
 
           def save_custom_json(file_path, data):
@@ -165,16 +165,16 @@ jobs:
           BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
 
           DISTRICTS = [
-              ("16", "kaimurbhabua"),
-            ("17", "patna2"),
-            ("21", "gaya"),
-            ("22", "jahanabad"),
-            ("23", "nawadah"),
-            ("24", "aurangabad"),
-            ("25", "arwal"),
-            ("31", "muzaffarpur"),
-            ("32", "sitamarhi"),
-            ("33", "vaishali"),
+              ("34", "eastchamparan"),
+            ("35", "westchamparan"),
+            ("36", "sheohar"),
+            ("41", "saran"),
+            ("42", "siwan"),
+            ("43", "gopalganj"),
+            ("51", "darbhanga"),
+            ("52", "madhubani"),
+            ("53", "samastipur"),
+            ("61", "saharsa"),
           ]
 
           print("===== VALIDATION START =====")
