@@ -53,16 +53,16 @@ jobs:
           # EDIT ONLY THIS LIST WHEN NEEDED
           # =========================================
           DISTRICTS = [
-            ("16": "kaimurbhabua"),
-            ("17": "patna2"),
-            ("21": "gaya"),
-            ("22": "jahanabad"),
-            ("23": "nawadah"),
-            ("24": "aurangabad"),
-            ("25": "arwal"),
-            ("31": "muzaffarpur"),
-            ("32": "sitamarhi"),
-            ("33": "vaishali"),
+            ("16", "kaimurbhabua"),
+            ("17", "patna2"),
+            ("21", "gaya"),
+            ("22", "jahanabad"),
+            ("23", "nawadah"),
+            ("24", "aurangabad"),
+            ("25", "arwal"),
+            ("31", "muzaffarpur"),
+            ("32", "sitamarhi"),
+            ("33", "vaishali"),
           ]
 
           def save_custom_json(file_path, data):
@@ -165,16 +165,16 @@ jobs:
           BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
 
           DISTRICTS = [
-              ("16": "kaimurbhabua"),
-            ("17": "patna2"),
-            ("21": "gaya"),
-            ("22": "jahanabad"),
-            ("23": "nawadah"),
-            ("24": "aurangabad"),
-            ("25": "arwal"),
-            ("31": "muzaffarpur"),
-            ("32": "sitamarhi"),
-            ("33": "vaishali"),
+              ("16", "kaimurbhabua"),
+            ("17", "patna2"),
+            ("21", "gaya"),
+            ("22", "jahanabad"),
+            ("23", "nawadah"),
+            ("24", "aurangabad"),
+            ("25", "arwal"),
+            ("31", "muzaffarpur"),
+            ("32", "sitamarhi"),
+            ("33", "vaishali"),
           ]
 
           print("===== VALIDATION START =====")
@@ -225,7 +225,7 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           find "BSEB 12TH RESULT/Bseb 12th Result 2026" -maxdepth 1 -name "*.json" -print0 | xargs -0 git add
-          git add ".github/workflows/extract-12th-district.yml"
+          git add ".github/workflows/extract-12th-multi-district.yml"
 
           git status
           git commit -m "Extract 12th district data batch 1" || echo "No changes to commit"
