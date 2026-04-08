@@ -1,47 +1,66 @@
 const axios = require("axios");
+const cheerio = require("cheerio");
 const fs = require("fs");
 const zlib = require("zlib");
+const readline = require("readline");
 
 // ===============================
 // CONFIG
 // ===============================
-const API_URL = "https://resultapi.biharboardonline.org/result";
+const BASE_URL = "https://interbiharboard.com/";
+const POST_URL = "https://interbiharboard.com/Result/GetResult";
+const SHOW_RESULT_URL = "https://interbiharboard.com/Result/ShowResult";
 
-const SCHOOL_LIST_FILE = "bseb-10th-school-list-2026.json";
-const FILE2_JSON = "bseb-10th-full-result-2026-2.json";
-const FILE2_GZ = "bseb-10th-full-result-2026-2.json.gz";
-const SEEN_FILE = "bseb-10th-seen-rollnos.txt";
+const VALID_ROLL_CODE_FILE = "bseb-12th-college-list-2026.json";
+
+// OLD HUGE MASTER (READ ONLY)
+const MASTER_GZ_FILE = "bseb-12th-full-result-2026.json.gz";
+
+// NEW REMAINING FILE (WRITE HERE)
+const CURRENT_GZ_FILE = "bseb-12th-full-result-2026-2.json.gz";
+
+// TEMP NDJSON FILE FOR CURRENT RUN
+const CURRENT_NDJSON_FILE = "bseb-12th-full-result-2026-2.ndjson";
+
+// DUPLICATE PROTECTION
+const SEEN_IDS_FILE = "bseb-12th-seen-rollnos.txt";
 
 // Roll number range per roll code
-const ROLLNO_START = 2600001;
-const ROLLNO_END = 2600999;
+const ROLLNO_START = 26020001;
+const ROLLNO_END = 26020999;
 
 // SPEED
-const ROLLCODE_PARALLEL = 10;
-const CONCURRENCY = 200;
-const BATCH_SIZE = 100;
-const REQUEST_TIMEOUT = 5000;
+const ROLLCODE_PARALLEL = 20;
+const CONCURRENCY = 100;
+const BATCH_SIZE = 50;
+const REQUEST_TIMEOUT = 6000;
 
 // SAVE
 const SAVE_EVERY_VALID_RESULTS = 100;
 
 // ===============================
-// SPLIT RANGE (CHANGE EACH RUN)
+// SPLIT RANGE (CHANGE THIS EACH RUN)
 // ===============================
-const START_INDEX = 7000;
-const END_INDEX = 7050;
+const START_INDEX = 2001;
+const END_INDEX = 2050;
 
 // ===============================
 // AXIOS CLIENT
 // ===============================
 const client = axios.create({
   timeout: REQUEST_TIMEOUT,
+  maxRedirects: 0,
+  validateStatus: () => true,
   headers: {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "application/json,text/plain,*/*",
-    "Referer": "https://result.biharboardonline.org/",
-    "Origin": "https://result.biharboardonline.org"
+    "Accept":
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1"
   }
 });
 
@@ -49,62 +68,58 @@ const client = axios.create({
 // HELPERS
 // ===============================
 function clean(txt) {
-  return String(txt || "").replace(/\s+/g, " ").trim();
+  return (txt || "").replace(/\s+/g, " ").trim();
 }
 
-function normalizeMarks(val) {
-  if (val === null || val === undefined) return "";
-  const str = String(val).trim();
-  if (!str) return "";
-  return String(Number(str));
+function generateCaptcha() {
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-function loadJSON(file, fallback = {}) {
-  if (!fs.existsSync(file)) return fallback;
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
+function detectAdditionalSection(text) {
+  const t = clean(text).toLowerCase();
+  if (t.includes("additional") || t.includes("अतिरिक्त")) {
+    return clean(text);
   }
+  return null;
 }
 
-function tryLoadFromGZ(file) {
-  if (!fs.existsSync(file)) return {};
-  try {
-    const gzRaw = fs.readFileSync(file);
-    const jsonRaw = zlib.gunzipSync(gzRaw).toString("utf8");
-    return JSON.parse(jsonRaw);
-  } catch (e) {
-    console.log(`⚠️ GZ invalid (${file}): ${e.message}`);
-    return {};
+function extractRequestVerificationToken(html) {
+  const $ = cheerio.load(html);
+  return clean($('input[name="__RequestVerificationToken"]').val() || "");
+}
+
+function mergeCookies(oldCookieHeader, newSetCookies = []) {
+  const jar = {};
+
+  function addCookieString(str) {
+    if (!str) return;
+    str.split(";").forEach(part => {
+      const p = part.trim();
+      if (!p.includes("=")) return;
+      const [k, ...rest] = p.split("=");
+      const v = rest.join("=");
+      if (k && v !== undefined) jar[k.trim()] = v.trim();
+    });
   }
+
+  addCookieString(oldCookieHeader);
+
+  newSetCookies.forEach(c => {
+    const first = c.split(";")[0];
+    addCookieString(first);
+  });
+
+  return Object.entries(jar)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("; ");
 }
 
-function loadSchoolRollCodes() {
-  const raw = loadJSON(SCHOOL_LIST_FILE, {});
-  return Object.keys(raw)
-    .filter(code => /^\d+$/.test(code))
-    .sort((a, b) => Number(a) - Number(b));
-}
-
-function countTotalStudentsSaved(fullResults) {
-  let total = 0;
-  for (const rollCode of Object.keys(fullResults)) {
-    total += Object.keys(fullResults[rollCode] || {}).length;
-  }
-  return total;
-}
-
-function compressJSONToGZ(jsonFile, gzFile) {
-  if (!fs.existsSync(jsonFile)) return;
-  const raw = fs.readFileSync(jsonFile);
-  const gz = zlib.gzipSync(raw, { level: 9 });
-  fs.writeFileSync(gzFile, gz);
-}
-
-function loadSeenRollNos() {
-  if (!fs.existsSync(SEEN_FILE)) return new Set();
-  const lines = fs.readFileSync(SEEN_FILE, "utf8")
+// ===============================
+// FILE HELPERS
+// ===============================
+function loadSeenIds(file) {
+  if (!fs.existsSync(file)) return new Set();
+  const lines = fs.readFileSync(file, "utf8")
     .split(/\r?\n/)
     .map(x => x.trim())
     .filter(Boolean);
@@ -112,123 +127,161 @@ function loadSeenRollNos() {
 }
 
 function appendSeenId(id) {
-  fs.appendFileSync(SEEN_FILE, id + "\n");
+  fs.appendFileSync(SEEN_IDS_FILE, id + "\n", "utf8");
+}
+
+function countNDJSONStudents(file) {
+  if (!fs.existsSync(file)) return 0;
+  const content = fs.readFileSync(file, "utf8").trim();
+  if (!content) return 0;
+  return content.split(/\r?\n/).filter(Boolean).length;
+}
+
+function appendStudentToNDJSON(student) {
+  fs.appendFileSync(CURRENT_NDJSON_FILE, JSON.stringify(student) + "\n", "utf8");
+}
+
+function gzipFile(inputFile, outputFile) {
+  if (!fs.existsSync(inputFile)) return;
+  const raw = fs.readFileSync(inputFile);
+  const gz = zlib.gzipSync(raw, { level: 9 });
+  fs.writeFileSync(outputFile, gz);
+}
+
+function countSeenIds(file) {
+  if (!fs.existsSync(file)) return 0;
+  const content = fs.readFileSync(file, "utf8").trim();
+  if (!content) return 0;
+  return content.split(/\r?\n/).filter(Boolean).length;
 }
 
 // ===============================
-// SUBJECT FORMATTER
+// SUBJECT PARSER
 // ===============================
-function buildPractical(subject) {
-  const projectWork = normalizeMarks(subject.project_work);
-  const literacyActivity = normalizeMarks(subject.literacy_activity);
-  const iaSci = normalizeMarks(subject.ia_sci);
-  const practical = normalizeMarks(subject.practical);
+function parseSubjects($) {
+  const subjects = [];
+  let marksTableFound = false;
+  let currentAdditionalSection = null;
 
-  if (subject.sub_code === "111") {
-    const parts = [];
-    if (projectWork) parts.push(projectWork);
-    if (literacyActivity) parts.push(literacyActivity);
-    return parts.join("+");
-  }
+  $("table").each((_, table) => {
+    if (marksTableFound) return;
 
-  if (subject.sub_code === "112") {
-    if (iaSci) return iaSci;
-  }
+    const rows = $(table).find("tr");
+    if (rows.length < 3) return;
 
-  if (practical) return practical;
+    const row1 = [];
+    const row2 = [];
 
-  const parts = [];
-  if (projectWork) parts.push(projectWork);
-  if (literacyActivity) parts.push(literacyActivity);
-  if (iaSci) parts.push(iaSci);
+    $(rows[0]).find("td,th").each((_, cell) => row1.push(clean($(cell).text())));
+    $(rows[1]).find("td,th").each((_, cell) => row2.push(clean($(cell).text())));
 
-  return parts.join("+");
-}
+    const row1Text = row1.join(" ").toLowerCase();
 
-function formatSubjects(subjects = []) {
-  return subjects.map(sub => {
-    const obj = {
-      subCode: clean(sub.sub_code || ""),
-      subject: clean(sub.sub_name || ""),
-      theory: normalizeMarks(sub.theory || ""),
-      subGroupId: clean(sub.sub_group_id || ""),
-      subTotal: normalizeMarks(sub.sub_total || "")
-    };
+    const isMarksTable =
+      row1Text.includes("subject") &&
+      row1Text.includes("full marks") &&
+      row1Text.includes("pass marks") &&
+      row1Text.includes("theory") &&
+      row1Text.includes("subject total");
 
-    const practical = buildPractical(sub);
-    if (practical) obj.practical = practical;
+    if (!isMarksTable) return;
+    marksTableFound = true;
 
-    if (sub.sub_result !== null && sub.sub_result !== undefined && clean(sub.sub_result) !== "") {
-      obj.subResult = clean(sub.sub_result);
+    for (let i = 2; i < rows.length; i++) {
+      const row = rows[i];
+      const cells = [];
+      $(row).find("td,th").each((_, cell) => cells.push(clean($(cell).text())));
+      if (!cells.length) continue;
+
+      if (cells.length === 1) {
+        const extraLabel = detectAdditionalSection(cells[0]);
+        currentAdditionalSection = extraLabel;
+        continue;
+      }
+
+      if (cells.length < 5) continue;
+
+      const subjectName = clean(cells[0]);
+      if (!subjectName) continue;
+
+      const obj = {
+        subject: subjectName,
+        FMarks: clean(cells[1] || ""),
+        PMarks: clean(cells[2] || ""),
+        theory: clean(cells[3] || ""),
+        subTotal: clean(cells[cells.length - 1] || "")
+      };
+
+      if (cells[4]) obj.practical = clean(cells[4] || "");
+      if (cells[5]) obj.regulationTheory = clean(cells[5] || "");
+      if (cells[6]) obj.regulationPractical = clean(cells[6] || "");
+
+      if (currentAdditionalSection) obj.extra = currentAdditionalSection;
+
+      subjects.push(obj);
     }
-
-    if (sub.regulation !== null && sub.regulation !== undefined && clean(sub.regulation) !== "") {
-      obj.regulation = clean(sub.regulation);
-    }
-
-    if (sub.cce !== null && sub.cce !== undefined && clean(sub.cce) !== "") {
-      obj.cce = clean(sub.cce);
-    }
-
-    if (sub.is_compartmental !== null && sub.is_compartmental !== undefined && clean(sub.is_compartmental) !== "") {
-      obj.isCompartmental = clean(sub.is_compartmental);
-    }
-
-    if (sub.is_improved_sub !== null && sub.is_improved_sub !== undefined && clean(sub.is_improved_sub) !== "") {
-      obj.isImprovedSub = clean(sub.is_improved_sub);
-    }
-
-    return obj;
   });
+
+  return subjects;
 }
 
 // ===============================
-// RESULT FORMATTER
+// RESULT EXTRACTION
 // ===============================
-function formatStudent(data) {
-  const student = {
-    studentName: clean(data.name || ""),
-    fatherName: clean(data.father_name || ""),
-    regNumber: clean(data.reg_no || ""),
-    BSEBUniqueId: clean(data.bseb_id || ""),
-    schoolName: clean(data.school_name || ""),
-    rollCode: clean(data.roll_code || ""),
-    rollNo: clean(data.roll_no || ""),
-    examType: clean(data.exam_type || ""),
-    totalMarks: normalizeMarks(data.total || ""),
-    division: clean(data.division || ""),
-    subjects: formatSubjects(data.subjects || [])
+function extractKeyValues($) {
+  const data = {};
+
+  $("table tr").each((_, row) => {
+    const tds = $(row).find("td");
+    if (tds.length === 2) {
+      const key = clean($(tds[0]).text()).replace(/:$/, "");
+      const value = clean($(tds[1]).text());
+      if (key && value) data[key] = value;
+    }
+  });
+
+  return data;
+}
+
+function extractFullResult(html) {
+  const $ = cheerio.load(html);
+  const kv = extractKeyValues($);
+  const subjects = parseSubjects($);
+
+  return {
+    studentName: kv["Student's Name"] || kv["Student Name"] || null,
+    fatherName: kv["Father's Name"] || kv["Father Name"] || null,
+    regNumber: kv["Registration Number"] || null,
+    BSEBUniqueId: kv["BSEB Unique Id"] || null,
+    schoolName: kv["School/College Name"] || kv["College Name"] || null,
+    rollCode: kv["Roll Code"] || null,
+    rollNo: kv["Roll Number"] || null,
+    stream: kv["Faculty"] || kv["Stream"] || null,
+    totalMarks: kv["Aggregate Marks"] || kv["Total Marks"] || null,
+    Division: kv["Result/Division"] || kv["Division"] || null,
+    subjects
   };
-
-  if (data.passed_under_regulation !== null && data.passed_under_regulation !== undefined && clean(data.passed_under_regulation) !== "") {
-    student.passedUnderRegulation = clean(data.passed_under_regulation);
-  }
-
-  if (data.is_topper === true) {
-    student.isTopper = true;
-  }
-
-  if (data.is_improved_result !== null && data.is_improved_result !== undefined && clean(data.is_improved_result) !== "") {
-    student.isImprovedResult = clean(data.is_improved_result);
-  }
-
-  if (data.is_expelled !== null && data.is_expelled !== undefined && clean(data.is_expelled) !== "") {
-    student.isExpelled = clean(data.is_expelled);
-  }
-
-  if (data.division_grace_marks !== null && data.division_grace_marks !== undefined && clean(data.division_grace_marks) !== "") {
-    student.divisionGraceMarks = clean(data.division_grace_marks);
-  }
-
-  return student;
 }
 
 // ===============================
-// SAVE FILE2
+// SESSION FETCH
 // ===============================
-function saveFile2JSON(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data), "utf8");
-  compressJSONToGZ(FILE2_JSON, FILE2_GZ);
+async function getSessionData() {
+  const res = await client.get(BASE_URL);
+
+  const html = res.data;
+  const rawCookies = res.headers["set-cookie"] || [];
+  const cookieHeader = rawCookies.map(c => c.split(";")[0]).join("; ");
+  const requestVerificationToken = extractRequestVerificationToken(html);
+
+  if (!requestVerificationToken) {
+    throw new Error("Could not fetch RequestVerificationToken");
+  }
+
+  return {
+    cookieHeader,
+    requestVerificationToken
+  };
 }
 
 // ===============================
@@ -236,18 +289,80 @@ function saveFile2JSON(file, data) {
 // ===============================
 async function fetchStudentResult(rollCode, rollNo) {
   try {
-    const res = await client.get(API_URL, {
-      params: {
-        roll_code: String(rollCode),
-        roll_no: String(rollNo)
+    const sessionData = await getSessionData();
+
+    const payload = new URLSearchParams();
+    payload.append("rollcode", String(rollCode));
+    payload.append("rollno", String(rollNo));
+    payload.append("captcha", generateCaptcha());
+    payload.append("__RequestVerificationToken", sessionData.requestVerificationToken);
+
+    const postRes = await client.post(POST_URL, payload.toString(), {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Cookie": sessionData.cookieHeader,
+        "Referer": BASE_URL,
+        "Origin": "https://interbiharboard.com"
       }
     });
 
-    if (!res.data || !res.data.success || !res.data.data) {
+    let cookieHeader = mergeCookies(
+      sessionData.cookieHeader,
+      postRes.headers["set-cookie"] || []
+    );
+
+    let resultHtml = "";
+
+    if (postRes.status >= 300 && postRes.status < 400 && postRes.headers.location) {
+      const location = postRes.headers.location.startsWith("http")
+        ? postRes.headers.location
+        : `https://interbiharboard.com${postRes.headers.location}`;
+
+      const followRes = await client.get(location, {
+        headers: {
+          "Cookie": cookieHeader,
+          "Referer": POST_URL
+        },
+        maxRedirects: 5
+      });
+
+      resultHtml = followRes.data;
+      cookieHeader = mergeCookies(cookieHeader, followRes.headers["set-cookie"] || []);
+    } else {
+      resultHtml = postRes.data;
+    }
+
+    const lower = String(resultHtml || "").toLowerCase();
+
+    const looksLikeFormAgain =
+      lower.includes("enter roll code") &&
+      lower.includes("enter roll number") &&
+      lower.includes("view result");
+
+    if (looksLikeFormAgain) {
+      const showRes = await client.get(SHOW_RESULT_URL, {
+        headers: {
+          "Cookie": cookieHeader,
+          "Referer": POST_URL
+        },
+        maxRedirects: 5
+      });
+
+      resultHtml = showRes.data;
+    }
+
+    const htmlLower = String(resultHtml || "").toLowerCase();
+
+    if (
+      htmlLower.includes("invalid") ||
+      htmlLower.includes("no record") ||
+      htmlLower.includes("not found") ||
+      htmlLower.includes("incorrect captcha")
+    ) {
       return { valid: false };
     }
 
-    const result = formatStudent(res.data.data);
+    const result = extractFullResult(resultHtml);
 
     if (
       result.studentName &&
@@ -264,42 +379,41 @@ async function fetchStudentResult(rollCode, rollNo) {
 }
 
 // ===============================
+// LOAD VALID ROLL CODES
+// ===============================
+function loadValidRollCodes() {
+  const raw = JSON.parse(fs.readFileSync(VALID_ROLL_CODE_FILE, "utf8"));
+  return Object.keys(raw)
+    .filter(code => /^\d+$/.test(code))
+    .sort((a, b) => Number(a) - Number(b));
+}
+
+// ===============================
 // GLOBAL STATE
 // ===============================
-const seenRollNos = loadSeenRollNos();
-
 const saveState = {
-  file2Results: {},
+  seenRollNos: new Set(),
+  file1Total: 0,
   file2Total: 0,
-  combinedTotal: seenRollNos.size,
-  unsavedValidCount: 0,
-  firstThisRunStudent: null,
-  lastThisRunStudent: null
+  combinedTotal: 0,
+  unsavedValidCount: 0
 };
 
 // ===============================
 // PROCESS ONE ROLL CODE
 // ===============================
 async function processRollCode(rollCode) {
-  if (!saveState.file2Results[rollCode]) saveState.file2Results[rollCode] = {};
+  let savedInThisRollCode = 0;
 
   let currentRollNo = ROLLNO_START;
-  let savedInThisRollCode = 0;
-  let skippedSeen = 0;
 
   while (currentRollNo <= ROLLNO_END) {
     const batchEnd = Math.min(currentRollNo + BATCH_SIZE - 1, ROLLNO_END);
     const batchRollNos = [];
 
-    // IMPORTANT: SKIP ALREADY SEEN BEFORE REQUEST
     for (let rn = currentRollNo; rn <= batchEnd; rn++) {
       const id = `${rollCode}-${rn}`;
-
-      if (seenRollNos.has(id)) {
-        skippedSeen++;
-        continue;
-      }
-
+      if (saveState.seenRollNos.has(id)) continue;
       batchRollNos.push(rn);
     }
 
@@ -316,30 +430,23 @@ async function processRollCode(rollCode) {
         const id = `${rollCode}-${rn}`;
 
         if (result.valid) {
-          // DOUBLE SAFETY AGAINST DUPLICATE SAVE
-          if (!seenRollNos.has(id)) {
-            if (!saveState.file2Results[rollCode][rn]) {
-              saveState.file2Results[rollCode][rn] = result.data;
-              seenRollNos.add(id);
-              appendSeenId(id);
+          if (!saveState.seenRollNos.has(id)) {
+            appendStudentToNDJSON(result.data);
+            appendSeenId(id);
+            saveState.seenRollNos.add(id);
 
-              saveState.unsavedValidCount++;
-              saveState.file2Total++;
-              saveState.combinedTotal++;
-              savedInThisRollCode++;
+            saveState.file2Total++;
+            saveState.combinedTotal++;
+            saveState.unsavedValidCount++;
+            savedInThisRollCode++;
 
-              if (!saveState.firstThisRunStudent) {
-                saveState.firstThisRunStudent = result.data;
-              }
-
-              saveState.lastThisRunStudent = result.data;
-            }
+            console.log(`${rollCode}-${savedInThisRollCode} student saved`);
           }
         }
       }
 
       if (saveState.unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
-        saveFile2JSON(FILE2_JSON, saveState.file2Results);
+        gzipFile(CURRENT_NDJSON_FILE, CURRENT_GZ_FILE);
         console.log(`💾 Progress Auto-Saved | File2: ${saveState.file2Total} | Combined: ${saveState.combinedTotal}`);
         saveState.unsavedValidCount = 0;
       }
@@ -348,43 +455,46 @@ async function processRollCode(rollCode) {
     currentRollNo = batchEnd + 1;
   }
 
-  console.log(`${rollCode}-${savedInThisRollCode} student saved | skipped seen: ${skippedSeen}`);
+  return savedInThisRollCode;
 }
 
 // ===============================
 // MAIN
 // ===============================
 (async () => {
-  const allRollCodes = loadSchoolRollCodes();
+  const allValidRollCodes = loadValidRollCodes();
 
-  if (!allRollCodes.length) {
-    console.log(`❌ No valid roll codes found in ${SCHOOL_LIST_FILE}`);
+  if (!allValidRollCodes.length) {
+    console.log(`❌ No valid roll codes found in ${VALID_ROLL_CODE_FILE}`);
     return;
   }
 
-  const selectedRollCodes = allRollCodes.slice(START_INDEX, END_INDEX + 1);
+  const selectedRollCodes = allValidRollCodes.slice(START_INDEX, END_INDEX + 1);
 
   if (!selectedRollCodes.length) {
     console.log(`❌ No roll codes found in selected split range ${START_INDEX}-${END_INDEX}`);
     return;
   }
 
-  let loadedFile2 = tryLoadFromGZ(FILE2_GZ);
-  if (!Object.keys(loadedFile2).length) {
-    loadedFile2 = loadJSON(FILE2_JSON, {});
-  }
+  // Load seen IDs
+  saveState.seenRollNos = loadSeenIds(SEEN_IDS_FILE);
 
-  saveState.file2Results = loadedFile2;
-  saveState.file2Total = countTotalStudentsSaved(saveState.file2Results);
+  // Master total = IDs from main file already extracted before
+  saveState.file1Total = saveState.seenRollNos.size;
 
-  // IMPORTANT: combined total = old seen IDs + current file2 loaded
-  // But seen file already includes file2 previous IDs too if saved before
-  saveState.combinedTotal = seenRollNos.size;
+  // Current file total = lines already present in file2 NDJSON
+  saveState.file2Total = countNDJSONStudents(CURRENT_NDJSON_FILE);
 
-  console.log(`🚀 BSEB 10TH FULL RESULT SCRAPER STARTED`);
-  console.log(`📚 Total valid roll codes available: ${allRollCodes.length}`);
+  // Combined = unique seen IDs count
+  saveState.combinedTotal = saveState.seenRollNos.size;
+
+  saveState.unsavedValidCount = 0;
+
+  console.log(`🚀 BSEB 12TH FULL RESULT SCRAPER STARTED`);
+  console.log(`📚 Total valid roll codes available: ${allValidRollCodes.length}`);
   console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
   console.log(`📦 Roll codes in this split: ${selectedRollCodes.length}`);
+  console.log(`📁 File1 (Master) Total: ${saveState.file1Total}`);
   console.log(`📁 File2 (Current) Total: ${saveState.file2Total}`);
   console.log(`📊 Combined Total Saved: ${saveState.combinedTotal}`);
   console.log(`⚡ Parallel Roll Codes: ${ROLLCODE_PARALLEL}`);
@@ -393,25 +503,32 @@ async function processRollCode(rollCode) {
   for (let i = 0; i < selectedRollCodes.length; i += ROLLCODE_PARALLEL) {
     const rollCodeChunk = selectedRollCodes.slice(i, i + ROLLCODE_PARALLEL);
 
-    await Promise.all(
+    const results = await Promise.all(
       rollCodeChunk.map(rollCode => processRollCode(rollCode))
     );
 
-    saveFile2JSON(FILE2_JSON, saveState.file2Results);
-    saveState.unsavedValidCount = 0;
+    gzipFile(CURRENT_NDJSON_FILE, CURRENT_GZ_FILE);
 
-    console.log(`💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | File2: ${saveState.file2Total} | Combined: ${saveState.combinedTotal}`);
+    console.log(
+      `💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | File2: ${saveState.file2Total} | Combined: ${saveState.combinedTotal}`
+    );
   }
 
-  saveFile2JSON(FILE2_JSON, saveState.file2Results);
+  gzipFile(CURRENT_NDJSON_FILE, CURRENT_GZ_FILE);
 
   console.log(`🎉 SCRAPE COMPLETED`);
+  console.log(`📁 File1 Total: ${saveState.file1Total}`);
   console.log(`📁 File2 Total: ${saveState.file2Total}`);
   console.log(`📊 Combined Total Saved: ${saveState.combinedTotal}`);
 
-  console.log(`\n===== FIRST SAVED STUDENT (THIS RUN) =====`);
-  console.log(JSON.stringify(saveState.firstThisRunStudent || null, null, 2));
-
-  console.log(`\n===== LAST SAVED STUDENT (THIS RUN) =====`);
-  console.log(JSON.stringify(saveState.lastThisRunStudent || null, null, 2));
+  if (fs.existsSync(CURRENT_NDJSON_FILE)) {
+    const lines = fs.readFileSync(CURRENT_NDJSON_FILE, "utf8").split(/\r?\n/).filter(Boolean);
+    if (lines.length) {
+      try {
+        const first = JSON.parse(lines[0]);
+        console.log("===== FIRST SAVED STUDENT (THIS RUN) =====");
+        console.log(JSON.stringify(first, null, 2));
+      } catch {}
+    }
+  }
 })();
