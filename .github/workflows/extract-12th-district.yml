@@ -1,15 +1,16 @@
-name: Extract 12th District Data
+name: Recover 12th Master File
 
 on:
   workflow_dispatch:
 
 jobs:
-  extract:
+  recover:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 60
 
     permissions:
       contents: write
+      actions: read
 
     steps:
       - name: Checkout Repo
@@ -18,263 +19,117 @@ jobs:
           persist-credentials: true
           lfs: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
       - name: Show Initial Files
         run: |
-          echo "===== ROOT ====="
+          echo "===== ROOT BEFORE RECOVERY ====="
           ls -lah
-          echo "===== 12TH FOLDER ====="
-          ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
+          echo "===== OLD FILE CHECK ====="
+          ls -lh bseb-12th-full-result-2026.json.gz || true
+          du -h bseb-12th-full-result-2026.json.gz || true
 
-      - name: Extract District Prefix
+      - name: Download Artifact ZIP
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          echo "===== DOWNLOADING ARTIFACT ====="
+
+          curl -L \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/6299169859/zip" \
+            -o artifact.zip
+
+          echo "===== ZIP DOWNLOADED ====="
+          ls -lh artifact.zip
+          du -h artifact.zip
+
+      - name: Extract Artifact
+        run: |
+          set -e
+
+          mkdir -p artifact_data
+          unzip -o artifact.zip -d artifact_data
+
+          echo "===== EXTRACTED FILES ====="
+          find artifact_data -type f | sort
+
+      - name: Restore Master GZ
+        run: |
+          set -e
+
+          FOUND_FILE=$(find artifact_data -type f -name "bseb-12th-full-result-2026.json.gz" | head -n 1)
+
+          if [ -z "$FOUND_FILE" ]; then
+            echo "❌ Could not find bseb-12th-full-result-2026.json.gz inside artifact"
+            exit 1
+          fi
+
+          cp "$FOUND_FILE" bseb-12th-full-result-2026.json.gz
+
+          echo "===== RESTORED FILE ====="
+          ls -lh bseb-12th-full-result-2026.json.gz
+          du -h bseb-12th-full-result-2026.json.gz
+
+      - name: Validate Restored File
         run: |
           node - <<'EOF'
           const fs = require("fs");
           const zlib = require("zlib");
-          const path = require("path");
 
-          // =========================
-          // CONFIG
-          // =========================
-          const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
-
-          // CHANGE THESE EACH TIME
-          const DISTRICT_PREFIX = "11";
-          const DISTRICT_NAME = "patna";
-
-          const INPUT_JSON = path.join(BASE_DIR, "bseb-12th-full-result-2026.json");
-          const INPUT_GZ = path.join(BASE_DIR, "bseb-12th-full-result-2026.json.gz");
-
-          const OUTPUT_JSON = path.join(
-            BASE_DIR,
-            `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
-          );
-
-          // =========================
-          // HELPERS
-          // =========================
-          function countStudents(data) {
-            let total = 0;
-            for (const rc of Object.keys(data)) {
-              total += Object.keys(data[rc] || {}).length;
-            }
-            return total;
-          }
-
-          function readMasterData() {
-            // 1) Prefer plain JSON if exists
-            if (fs.existsSync(INPUT_JSON)) {
-              console.log("📂 Reading master JSON...");
-              const text = fs.readFileSync(INPUT_JSON, "utf8");
-              return JSON.parse(text);
-            }
-
-            // 2) Otherwise try GZ safely
-            if (!fs.existsSync(INPUT_GZ)) {
-              throw new Error("Master file not found (.json or .json.gz)");
-            }
-
-            console.log("📂 Reading master GZ...");
-            const raw = fs.readFileSync(INPUT_GZ);
-
-            // Check if really gzip (magic bytes 1F 8B)
-            const isGzip = raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b;
-
-            let text = "";
-
-            if (isGzip) {
-              console.log("🗜️ Valid gzip detected");
-              text = zlib.gunzipSync(raw).toString("utf8");
-            } else {
-              console.log("⚠️ File has .gz extension but is actually plain JSON. Reading as text...");
-              text = raw.toString("utf8");
-            }
-
-            return JSON.parse(text);
-          }
-
-          function formatStudent(student, indent = "    ") {
-            const lines = [];
-            lines.push("{");
-            lines.push(`${indent}"studentName": ${JSON.stringify(student.studentName)},`);
-            lines.push(`${indent}"fatherName": ${JSON.stringify(student.fatherName)},`);
-            lines.push(`${indent}"regNumber": ${JSON.stringify(student.regNumber)},`);
-            lines.push(`${indent}"BSEBUniqueId": ${JSON.stringify(student.BSEBUniqueId)},`);
-            lines.push(`${indent}"schoolName": ${JSON.stringify(student.schoolName)},`);
-            lines.push(`${indent}"rollCode": ${JSON.stringify(student.rollCode)},`);
-            lines.push(`${indent}"rollNo": ${JSON.stringify(student.rollNo)},`);
-            lines.push(`${indent}"stream": ${JSON.stringify(student.stream)},`);
-            lines.push(`${indent}"totalMarks": ${JSON.stringify(student.totalMarks)},`);
-            lines.push(`${indent}"Division": ${JSON.stringify(student.Division)},`);
-            lines.push(`${indent}"subjects": [`);
-
-            const subjectLines = (student.subjects || []).map((sub) => {
-              const ordered = {};
-              ordered.subject = sub.subject;
-              ordered.FMarks = sub.FMarks;
-              ordered.PMarks = sub.PMarks;
-              ordered.theory = sub.theory;
-              if (sub.practical !== undefined) ordered.practical = sub.practical;
-              if (sub.regulationTheory !== undefined) ordered.regulationTheory = sub.regulationTheory;
-              if (sub.regulationPractical !== undefined) ordered.regulationPractical = sub.regulationPractical;
-              ordered.subTotal = sub.subTotal;
-              if (sub.extra !== undefined) ordered.extra = sub.extra;
-
-              return `${indent}  ${JSON.stringify(ordered)}`;
-            });
-
-            lines.push(subjectLines.join(",\n"));
-            lines.push(`${indent}]`);
-            lines.push("}");
-            return lines.join("\n");
-          }
-
-          function saveCustomJSON(file, data) {
-            const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-            const fd = fs.openSync(file, "w");
-
-            try {
-              fs.writeSync(fd, "{\n");
-
-              rollCodes.forEach((rollCode, idx) => {
-                const students = data[rollCode] || {};
-                const rollNoKeys = Object.keys(students).sort((a, b) => Number(a) - Number(b));
-
-                fs.writeSync(fd, `  ${JSON.stringify(rollCode)}: {\n`);
-
-                rollNoKeys.forEach((rollNo, i) => {
-                  const student = students[rollNo];
-                  const formatted = formatStudent(student, "      ")
-                    .split("\n")
-                    .map((line, index) => (index === 0 ? `    ${JSON.stringify(rollNo)}: ${line}` : `    ${line}`))
-                    .join("\n");
-
-                  fs.writeSync(fd, formatted + (i < rollNoKeys.length - 1 ? ",\n" : "\n"));
-                });
-
-                fs.writeSync(fd, `  }${idx < rollCodes.length - 1 ? ",\n" : "\n"}`);
-              });
-
-              fs.writeSync(fd, "}\n");
-            } finally {
-              fs.closeSync(fd);
-            }
-          }
-
-          // =========================
-          // START
-          // =========================
-          const fullData = readMasterData();
-
-          console.log("✅ Master loaded");
-          console.log("📚 Total Roll Codes:", Object.keys(fullData).length);
-          console.log("🎓 Total Students:", countStudents(fullData));
-
-          console.log(`🔍 Filtering district prefix: ${DISTRICT_PREFIX}`);
-
-          const districtData = {};
-          let matchedRollCodes = 0;
-          let extractedStudents = 0;
-
-          const allRollCodes = Object.keys(fullData).sort((a, b) => Number(a) - Number(b));
-
-          for (const rollCode of allRollCodes) {
-            if (!String(rollCode).startsWith(DISTRICT_PREFIX)) continue;
-
-            const students = fullData[rollCode] || {};
-            const sortedStudents = {};
-
-            Object.keys(students)
-              .sort((a, b) => Number(a) - Number(b))
-              .forEach((rollNo) => {
-                sortedStudents[rollNo] = students[rollNo];
-              });
-
-            districtData[rollCode] = sortedStudents;
-            matchedRollCodes++;
-
-            const count = Object.keys(sortedStudents).length;
-            extractedStudents += count;
-
-            if (matchedRollCodes % 25 === 0) {
-              console.log(`📦 Roll Codes Extracted: ${matchedRollCodes} | Students: ${extractedStudents}`);
-            }
-          }
-
-          if (matchedRollCodes === 0) {
-            console.log("⚠️ No roll codes found for this district prefix.");
-          }
-
-          console.log("💾 Saving district file...");
-          saveCustomJSON(OUTPUT_JSON, districtData);
-
-          console.log("✅ District extraction complete");
-          console.log("🏙️ District:", DISTRICT_NAME);
-          console.log("🔢 Prefix:", DISTRICT_PREFIX);
-          console.log("📚 Roll Codes:", matchedRollCodes);
-          console.log("🎓 Students:", extractedStudents);
-          console.log("📄 Saved to:", OUTPUT_JSON);
-          EOF
-
-      - name: Validate Extracted District File
-        run: |
-          node - <<'EOF'
-          const fs = require("fs");
-          const path = require("path");
-
-          const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
-          const DISTRICT_PREFIX = "11";
-          const DISTRICT_NAME = "patna";
-
-          const file = path.join(
-            BASE_DIR,
-            `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
-          );
+          const file = "bseb-12th-full-result-2026.json.gz";
 
           if (!fs.existsSync(file)) {
-            console.error("❌ Extracted district file not found");
+            console.error("❌ Restored file missing");
             process.exit(1);
           }
 
-          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+          const raw = fs.readFileSync(file);
+          console.log("📦 Restored GZ Size:", raw.length, "bytes");
+
+          if (raw.length === 0) {
+            console.error("❌ Restored file is 0 bytes");
+            process.exit(1);
+          }
+
+          const isGzip = raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b;
+
+          let text = "";
+          if (isGzip) {
+            console.log("🗜️ Valid gzip detected");
+            text = zlib.gunzipSync(raw).toString("utf8");
+          } else {
+            console.log("⚠️ File is not gzip, treating as plain JSON");
+            text = raw.toString("utf8");
+          }
+
+          const data = JSON.parse(text);
 
           let total = 0;
           for (const rc of Object.keys(data)) {
             total += Object.keys(data[rc] || {}).length;
           }
 
-          console.log("✅ District JSON valid");
+          console.log("✅ Master file valid");
           console.log("📚 Roll Codes:", Object.keys(data).length);
           console.log("🎓 Students:", total);
-
-          const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-          console.log("🔹 First Roll Code:", rollCodes[0] || "none");
-          console.log("🔹 Last Roll Code:", rollCodes[rollCodes.length - 1] || "none");
           EOF
 
-      - name: Show Final Files
-        if: always()
-        run: |
-          echo "===== FINAL 12TH FOLDER ====="
-          ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
-
-          echo "===== FILE SIZE ====="
-          du -h "BSEB 12TH RESULT/Bseb 12th Result 2026/patna-11-bseb-12th-full-result-2026.json" || true
-
-      - name: Commit District File
-        if: always()
+      - name: Commit Restored File
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add "BSEB 12TH RESULT/Bseb 12th Result 2026/patna-11-bseb-12th-full-result-2026.json"
-          git add ".github/workflows/extract-12th-district.yml"
+          git add bseb-12th-full-result-2026.json.gz
+          git add .github/workflows/extract-12th-district.yml
 
           git status
-          git commit -m "Extract 12th Patna district data (11)" || echo "No changes to commit"
+          git commit -m "Recover valid 12th master file from artifact" || echo "No changes to commit"
           git pull --rebase origin main || true
           git push
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf artifact.zip artifact_data || true
