@@ -18,13 +18,13 @@ jobs:
           persist-credentials: true
           lfs: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: 20
+          python-version: "3.11"
 
-      - name: Install Stream Parser
-        run: npm install stream-json
+      - name: Install Python Dependency
+        run: pip install ijson
 
       - name: Show Initial Files
         run: |
@@ -38,160 +38,136 @@ jobs:
 
       - name: Extract District Prefix
         run: |
-          node - <<'EOF'
-          const fs = require("fs");
-          const path = require("path");
-          const zlib = require("zlib");
-          const { pipeline } = require("stream");
-          const { parser } = require("stream-json");
-          const { streamObject } = require("stream-json/streamers/StreamObject");
+          python << 'EOF'
+          import os
+          import gzip
+          import json
+          import ijson
 
-          // =========================
-          // CONFIG
-          // =========================
-          const MASTER_GZ = "bseb-12th-full-result-2026.json.gz";
+          # =========================
+          # CONFIG
+          # =========================
+          MASTER_GZ = "bseb-12th-full-result-2026.json.gz"
 
-          const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
+          BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
 
-          // CHANGE THESE EACH TIME
-          const DISTRICT_PREFIX = "11";
-          const DISTRICT_NAME = "patna";
+          # CHANGE THESE EACH TIME
+          DISTRICT_PREFIX = "11"
+          DISTRICT_NAME = "patna"
 
-          const OUTPUT_JSON = path.join(
-            BASE_DIR,
-            `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
-          );
+          OUTPUT_JSON = os.path.join(
+              BASE_DIR,
+              f"{DISTRICT_NAME}-{DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
+          )
 
-          // =========================
-          // HELPERS
-          // =========================
-          function saveCustomJSON(file, data) {
-            const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-            const lines = [];
-            lines.push("{");
+          # =========================
+          # HELPERS
+          # =========================
+          def count_students(data):
+              total = 0
+              for rc in data:
+                  total += len(data[rc] or {})
+              return total
 
-            rollCodes.forEach((rollCode, idx) => {
-              const students = data[rollCode] || {};
-              const rollNos = Object.keys(students).sort((a, b) => Number(a) - Number(b));
+          def save_custom_json(file_path, data):
+              roll_codes = sorted(data.keys(), key=lambda x: int(x))
 
-              lines.push(`  ${JSON.stringify(rollCode)}: {`);
+              with open(file_path, "w", encoding="utf-8") as f:
+                  f.write("{\n")
 
-              rollNos.forEach((rollNo, i) => {
-                const student = students[rollNo];
-                const json = JSON.stringify(student, null, 6)
-                  .split("\n")
-                  .map((line, lineIndex) => {
-                    if (lineIndex === 0) {
-                      return `    ${JSON.stringify(rollNo)}: ${line}`;
-                    }
-                    return `    ${line}`;
-                  })
-                  .join("\n");
+                  for rc_index, roll_code in enumerate(roll_codes):
+                      students = data.get(roll_code, {})
+                      roll_nos = sorted(students.keys(), key=lambda x: int(x))
 
-                lines.push(json + (i < rollNos.length - 1 ? "," : ""));
-              });
+                      f.write(f'  "{roll_code}": {{\n')
 
-              lines.push(`  }${idx < rollCodes.length - 1 ? "," : ""}`);
-            });
+                      for rn_index, roll_no in enumerate(roll_nos):
+                          student = students[roll_no]
+                          student_json = json.dumps(student, ensure_ascii=False, indent=6)
+                          lines = student_json.splitlines()
 
-            lines.push("}");
-            fs.writeFileSync(file, lines.join("\n"), "utf8");
-          }
+                          for line_index, line in enumerate(lines):
+                              if line_index == 0:
+                                  f.write(f'    "{roll_no}": {line}\n')
+                              else:
+                                  f.write(f'    {line}\n')
 
-          // =========================
-          // START
-          // =========================
-          if (!fs.existsSync(MASTER_GZ)) {
-            console.error("❌ Master GZ file not found:", MASTER_GZ);
-            process.exit(1);
-          }
+                          if rn_index < len(roll_nos) - 1:
+                              f.write(",\n")
 
-          if (!fs.existsSync(BASE_DIR)) {
-            fs.mkdirSync(BASE_DIR, { recursive: true });
-          }
+                      f.write("\n  }")
+                      if rc_index < len(roll_codes) - 1:
+                          f.write(",")
+                      f.write("\n")
 
-          console.log("📂 Streaming master file...");
-          console.log("🔍 Filtering district prefix:", DISTRICT_PREFIX);
+                  f.write("}\n")
 
-          const districtData = {};
-          let matchedRollCodes = 0;
-          let extractedStudents = 0;
+          # =========================
+          # START
+          # =========================
+          if not os.path.exists(MASTER_GZ):
+              print(f"❌ Master GZ file not found: {MASTER_GZ}")
+              raise SystemExit(1)
 
-          const objectStreamer = streamObject();
+          os.makedirs(BASE_DIR, exist_ok=True)
 
-          objectStreamer.on("data", ({ key, value }) => {
-            if (!String(key).startsWith(DISTRICT_PREFIX)) return;
+          print("📂 Streaming master file...")
+          print("🔍 Filtering district prefix:", DISTRICT_PREFIX)
 
-            districtData[key] = value;
-            matchedRollCodes++;
+          district_data = {}
+          matched_roll_codes = 0
+          extracted_students = 0
 
-            const count = Object.keys(value || {}).length;
-            extractedStudents += count;
+          with gzip.open(MASTER_GZ, "rb") as f:
+              for roll_code, value in ijson.kvitems(f, ""):
+                  if not str(roll_code).startswith(DISTRICT_PREFIX):
+                      continue
 
-            if (matchedRollCodes % 25 === 0) {
-              console.log(`📦 Roll Codes Extracted: ${matchedRollCodes} | Students: ${extractedStudents}`);
-            }
-          });
+                  district_data[str(roll_code)] = value
+                  matched_roll_codes += 1
+                  extracted_students += len(value or {})
 
-          objectStreamer.on("end", () => {
-            console.log("💾 Saving district file...");
-            saveCustomJSON(OUTPUT_JSON, districtData);
+                  if matched_roll_codes % 25 == 0:
+                      print(f"📦 Roll Codes Extracted: {matched_roll_codes} | Students: {extracted_students}")
 
-            console.log("✅ District extraction complete");
-            console.log("🏙️ District:", DISTRICT_NAME);
-            console.log("🔢 Prefix:", DISTRICT_PREFIX);
-            console.log("📚 Roll Codes:", matchedRollCodes);
-            console.log("🎓 Students:", extractedStudents);
-            console.log("📄 Saved to:", OUTPUT_JSON);
-          });
+          print("💾 Saving district file...")
+          save_custom_json(OUTPUT_JSON, district_data)
 
-          objectStreamer.on("error", (err) => {
-            console.error("❌ Stream parse failed:", err.message);
-            process.exit(1);
-          });
-
-          pipeline(
-            fs.createReadStream(MASTER_GZ),
-            zlib.createGunzip(),
-            parser(),
-            objectStreamer,
-            (err) => {
-              if (err) {
-                console.error("❌ Pipeline failed:", err.message);
-                process.exit(1);
-              }
-            }
-          );
+          print("✅ District extraction complete")
+          print("🏙️ District:", DISTRICT_NAME)
+          print("🔢 Prefix:", DISTRICT_PREFIX)
+          print("📚 Roll Codes:", matched_roll_codes)
+          print("🎓 Students:", extracted_students)
+          print("📄 Saved to:", OUTPUT_JSON)
           EOF
 
       - name: Validate Extracted District File
         run: |
-          node - <<'EOF'
-          const fs = require("fs");
-          const path = require("path");
+          python << 'EOF'
+          import os
+          import json
 
-          const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
-          const file = path.join(BASE_DIR, "patna-11-bseb-12th-full-result-2026.json");
+          BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
+          file = os.path.join(BASE_DIR, "patna-11-bseb-12th-full-result-2026.json")
 
-          if (!fs.existsSync(file)) {
-            console.error("❌ Extracted district file not found");
-            process.exit(1);
-          }
+          if not os.path.exists(file):
+              print("❌ Extracted district file not found")
+              raise SystemExit(1)
 
-          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+          with open(file, "r", encoding="utf-8") as f:
+              data = json.load(f)
 
-          let total = 0;
-          for (const rc of Object.keys(data)) {
-            total += Object.keys(data[rc] || {}).length;
-          }
+          total = 0
+          for rc in data:
+              total += len(data[rc] or {})
 
-          console.log("✅ District JSON valid");
-          console.log("📚 Roll Codes:", Object.keys(data).length);
-          console.log("🎓 Students:", total);
+          print("✅ District JSON valid")
+          print("📚 Roll Codes:", len(data))
+          print("🎓 Students:", total)
 
-          const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-          console.log("🔹 First Roll Code:", rollCodes[0] || "none");
-          console.log("🔹 Last Roll Code:", rollCodes[rollCodes.length - 1] || "none");
+          roll_codes = sorted(data.keys(), key=lambda x: int(x))
+          print("🔹 First Roll Code:", roll_codes[0] if roll_codes else "none")
+          print("🔹 Last Roll Code:", roll_codes[-1] if roll_codes else "none")
           EOF
 
       - name: Show Final Files
