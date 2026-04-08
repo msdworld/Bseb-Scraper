@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  DISTRICT_PREFIX: "14"
+  DISTRICT_PREFIX: "15"
   DISTRICT_NAME: "rohtas"
 
 jobs:
