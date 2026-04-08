@@ -1,4 +1,4 @@
-name: BSEB 12th Remaining Result 2026
+name: BSEB 12th Full Result Remaining
 
 on:
   workflow_dispatch:
@@ -10,6 +10,7 @@ jobs:
 
     permissions:
       contents: write
+      actions: read
 
     steps:
       - name: Checkout Repo
@@ -25,7 +26,7 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: npm install axios
+        run: npm install axios cheerio
 
       - name: Show Initial Files
         run: |
@@ -35,107 +36,76 @@ jobs:
       - name: Ensure Required Files Exist
         run: |
           [ -f bseb-12th-seen-rollnos.txt ] || touch bseb-12th-seen-rollnos.txt
-          [ -f bseb-12th-full-result-2026-2.json ] || echo "{}" > bseb-12th-full-result-2026-2.json
+          [ -f bseb-12th-full-result-2026-2.ndjson ] || touch bseb-12th-full-result-2026-2.ndjson
 
-      - name: Restore File2 JSON from GZ if Available
+      - name: Show Seen IDs Status
         run: |
-          if [ -f bseb-12th-full-result-2026-2.json.gz ]; then
-            echo "===== RESTORING FILE2 JSON FROM GZ ====="
-            gunzip -c bseb-12th-full-result-2026-2.json.gz > bseb-12th-full-result-2026-2.json || echo "{}" > bseb-12th-full-result-2026-2.json
-          else
-            echo "⚠️ No File2 GZ found. Starting fresh File2."
-            echo "{}" > bseb-12th-full-result-2026-2.json
-          fi
-
-      - name: Validate Seen IDs + File2
-        run: |
-          echo "===== CHECK SEEN IDS FILE ====="
+          echo "===== SEEN IDS FILE ====="
           ls -lh bseb-12th-seen-rollnos.txt || true
           du -h bseb-12th-seen-rollnos.txt || true
           wc -l bseb-12th-seen-rollnos.txt || true
 
-          echo "===== CHECK FILE2 ====="
-          ls -lh bseb-12th-full-result-2026-2.json || true
-          du -h bseb-12th-full-result-2026-2.json || true
+      - name: Show Current File2 Status
+        run: |
+          echo "===== CURRENT FILE2 NDJSON ====="
+          ls -lh bseb-12th-full-result-2026-2.ndjson || true
+          du -h bseb-12th-full-result-2026-2.ndjson || true
+          wc -l bseb-12th-full-result-2026-2.ndjson || true
 
-          node - <<'EOF'
-          const fs = require("fs");
-
-          function count(data) {
-            let total = 0;
-            for (const rc of Object.keys(data)) {
-              total += Object.keys(data[rc] || {}).length;
-            }
-            return total;
-          }
-
-          try {
-            const data = JSON.parse(fs.readFileSync("bseb-12th-full-result-2026-2.json", "utf8"));
-            console.log("✅ File2 JSON valid");
-            console.log("🎓 File2 Students:", count(data));
-          } catch (e) {
-            console.log("❌ File2 invalid:", e.message);
-            process.exit(1);
-          }
-          EOF
-
-      - name: Run 12th Script
+      - name: Run 12th Remaining Scraper
         run: node script.js
 
-      - name: Validate Final File2 JSON
+      - name: Validate Current NDJSON
         if: always()
         run: |
           node - <<'EOF'
           const fs = require("fs");
 
-          function count(data) {
-            let total = 0;
-            for (const rc of Object.keys(data)) {
-              total += Object.keys(data[rc] || {}).length;
-            }
-            return total;
-          }
-
-          const file = "bseb-12th-full-result-2026-2.json";
+          const file = "bseb-12th-full-result-2026-2.ndjson";
 
           if (!fs.existsSync(file)) {
-            console.error("❌ File2 JSON missing");
-            process.exit(1);
+            console.log("⚠️ NDJSON file missing");
+            process.exit(0);
           }
 
-          const data = JSON.parse(fs.readFileSync(file, "utf8"));
-          console.log("✅ Final File2 JSON valid");
-          console.log("📚 Roll Codes:", Object.keys(data).length);
-          console.log("🎓 Students:", count(data));
+          const lines = fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean);
+
+          console.log("✅ NDJSON exists");
+          console.log("📚 Total students in file2:", lines.length);
+
+          if (lines.length) {
+            try {
+              const first = JSON.parse(lines[0]);
+              console.log("✅ First line valid JSON");
+              console.log("👤 First Student:", first.studentName || "N/A");
+            } catch (e) {
+              console.error("❌ Invalid NDJSON line:", e.message);
+              process.exit(1);
+            }
+          }
           EOF
 
-      - name: Compress File2 JSON to GZ
+      - name: Validate GZ
         if: always()
         run: |
-          gzip -c bseb-12th-full-result-2026-2.json > bseb-12th-full-result-2026-2.json.gz
-
-      - name: Validate File2 GZ
-        if: always()
-        run: |
-          gunzip -c bseb-12th-full-result-2026-2.json.gz > test.json
-
           node - <<'EOF'
           const fs = require("fs");
+          const zlib = require("zlib");
 
-          function count(data) {
-            let total = 0;
-            for (const rc of Object.keys(data)) {
-              total += Object.keys(data[rc] || {}).length;
-            }
-            return total;
+          const gzFile = "bseb-12th-full-result-2026-2.json.gz";
+
+          if (!fs.existsSync(gzFile)) {
+            console.log("⚠️ GZ file not found");
+            process.exit(0);
           }
 
-          const data = JSON.parse(fs.readFileSync("test.json", "utf8"));
-          console.log("✅ File2 GZ valid");
-          console.log("🎓 GZ Students:", count(data));
-          EOF
+          const raw = fs.readFileSync(gzFile);
+          const text = zlib.gunzipSync(raw).toString("utf8");
+          const lines = text.split(/\r?\n/).filter(Boolean);
 
-          rm -f test.json
+          console.log("✅ GZ valid");
+          console.log("📚 GZ students:", lines.length);
+          EOF
 
       - name: Show Final Files
         if: always()
@@ -143,17 +113,22 @@ jobs:
           echo "===== FINAL FILES ====="
           ls -lah
 
-          echo "===== FILE2 JSON SIZE ====="
-          du -h bseb-12th-full-result-2026-2.json || true
+          echo "===== MASTER FILE ====="
+          ls -lh bseb-12th-full-result-2026.json.gz || true
+          du -h bseb-12th-full-result-2026.json.gz || true
 
-          echo "===== FILE2 GZ SIZE ====="
+          echo "===== FILE2 GZ ====="
+          ls -lh bseb-12th-full-result-2026-2.json.gz || true
           du -h bseb-12th-full-result-2026-2.json.gz || true
 
-          echo "===== SEEN IDS ====="
-          wc -l bseb-12th-seen-rollnos.txt || true
+          echo "===== FILE2 NDJSON ====="
+          ls -lh bseb-12th-full-result-2026-2.ndjson || true
+          du -h bseb-12th-full-result-2026-2.ndjson || true
 
-          echo "===== PROGRESS ====="
-          cat progress.txt || true
+          echo "===== SEEN IDS ====="
+          ls -lh bseb-12th-seen-rollnos.txt || true
+          du -h bseb-12th-seen-rollnos.txt || true
+          wc -l bseb-12th-seen-rollnos.txt || true
 
       - name: Commit and Push
         if: always()
@@ -161,12 +136,19 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # never push raw json
-          rm -f bseb-12th-full-result-2026-2.json || true
+          # clean junk
+          rm -rf node_modules || true
+          git restore package.json package-lock.json || true
 
+          # IMPORTANT: fetch latest first BEFORE committing
+          git fetch origin main
+          git checkout main
+          git pull --rebase origin main || true
+
+          # add only required files
           [ -f bseb-12th-full-result-2026-2.json.gz ] && git add bseb-12th-full-result-2026-2.json.gz
+          [ -f bseb-12th-full-result-2026-2.ndjson ] && git add bseb-12th-full-result-2026-2.ndjson
           [ -f bseb-12th-seen-rollnos.txt ] && git add bseb-12th-seen-rollnos.txt
-          [ -f progress.txt ] && git add progress.txt
           [ -f script.js ] && git add script.js
           [ -f .github/workflows/recheck.yml ] && git add .github/workflows/recheck.yml
 
@@ -174,15 +156,14 @@ jobs:
 
           git commit -m "Update BSEB 12th remaining result 2026" || echo "No changes to commit"
 
-          # IMPORTANT: no rebase, no pull, no conflict mess
-          git push origin HEAD:main
+          git push origin main
 
       - name: Upload Backup Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bseb-12th-remaining-result-data
+          name: bseb-12th-remaining-backup
           path: |
             bseb-12th-full-result-2026-2.json.gz
+            bseb-12th-full-result-2026-2.ndjson
             bseb-12th-seen-rollnos.txt
-            progress.txt
