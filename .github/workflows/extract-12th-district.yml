@@ -3,6 +3,10 @@ name: Extract 12th District Data
 on:
   workflow_dispatch:
 
+env:
+  DISTRICT_PREFIX: "14"
+  DISTRICT_NAME: "rohtas"
+
 jobs:
   extract:
     runs-on: ubuntu-latest
@@ -30,11 +34,17 @@ jobs:
         run: |
           echo "===== ROOT ====="
           ls -lah
+
           echo "===== 12TH FOLDER ====="
           ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
+
           echo "===== MASTER FILE ====="
           ls -lh bseb-12th-full-result-2026.json.gz || true
           du -h bseb-12th-full-result-2026.json.gz || true
+
+          echo "===== DISTRICT CONFIG ====="
+          echo "DISTRICT_PREFIX=$DISTRICT_PREFIX"
+          echo "DISTRICT_NAME=$DISTRICT_NAME"
 
       - name: Extract District Prefix
         run: |
@@ -44,30 +54,16 @@ jobs:
           import json
           import ijson
 
-          # =========================
-          # CONFIG
-          # =========================
           MASTER_GZ = "bseb-12th-full-result-2026.json.gz"
-
           BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
 
-          # CHANGE THESE EACH TIME
-          DISTRICT_PREFIX = "14"
-          DISTRICT_NAME = "buxar"
+          DISTRICT_PREFIX = os.environ["DISTRICT_PREFIX"]
+          DISTRICT_NAME = os.environ["DISTRICT_NAME"]
 
           OUTPUT_JSON = os.path.join(
               BASE_DIR,
               f"{DISTRICT_NAME}-{DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
           )
-
-          # =========================
-          # HELPERS
-          # =========================
-          def count_students(data):
-              total = 0
-              for rc in data:
-                  total += len(data[rc] or {})
-              return total
 
           def save_custom_json(file_path, data):
               roll_codes = sorted(data.keys(), key=lambda x: int(x))
@@ -102,9 +98,6 @@ jobs:
 
                   f.write("}\n")
 
-          # =========================
-          # START
-          # =========================
           if not os.path.exists(MASTER_GZ):
               print(f"❌ Master GZ file not found: {MASTER_GZ}")
               raise SystemExit(1)
@@ -148,7 +141,14 @@ jobs:
           import json
 
           BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
-          file = os.path.join(BASE_DIR, f"{DISTRICT_NAME}-{DISTRICT_PREFIX}-bseb-12th-full-result-2026.json")
+
+          DISTRICT_PREFIX = os.environ["DISTRICT_PREFIX"]
+          DISTRICT_NAME = os.environ["DISTRICT_NAME"]
+
+          file = os.path.join(
+              BASE_DIR,
+              f"{DISTRICT_NAME}-{DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
+          )
 
           if not os.path.exists(file):
               print("❌ Extracted district file not found")
@@ -177,7 +177,7 @@ jobs:
           ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
 
           echo "===== FILE SIZE ====="
-          du -h "BSEB 12TH RESULT/Bseb 12th Result 2026/patna-11-bseb-12th-full-result-2026.json" || true
+          du -h "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json" || true
 
       - name: Commit District File
         if: always()
@@ -189,6 +189,6 @@ jobs:
           git add ".github/workflows/extract-12th-district.yml"
 
           git status
-          git commit -m "Extract 12th district data" || echo "No changes to commit"
+          git commit -m "Extract 12th district data (${DISTRICT_NAME}-${DISTRICT_PREFIX})" || echo "No changes to commit"
           git pull --rebase origin main || true
           git push
