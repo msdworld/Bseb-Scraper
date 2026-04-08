@@ -1,16 +1,15 @@
-name: Recover 12th Master File
+name: Extract 12th District Data
 
 on:
   workflow_dispatch:
 
 jobs:
-  recover:
+  extract:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 360
 
     permissions:
       contents: write
-      actions: read
 
     steps:
       - name: Checkout Repo
@@ -19,106 +18,212 @@ jobs:
           persist-credentials: true
           lfs: false
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Stream Parser
+        run: npm install stream-json
+
       - name: Show Initial Files
         run: |
-          echo "===== ROOT BEFORE RECOVERY ====="
+          echo "===== ROOT ====="
           ls -lah
-          echo "===== OLD FILE CHECK ====="
+          echo "===== 12TH FOLDER ====="
+          ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
+          echo "===== MASTER FILE ====="
           ls -lh bseb-12th-full-result-2026.json.gz || true
           du -h bseb-12th-full-result-2026.json.gz || true
 
-      - name: Download Artifact ZIP
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-
-          echo "===== DOWNLOADING ARTIFACT ====="
-
-          curl -L \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/6299169859/zip" \
-            -o artifact.zip
-
-          echo "===== ZIP DOWNLOADED ====="
-          ls -lh artifact.zip
-          du -h artifact.zip
-
-      - name: Extract Artifact
-        run: |
-          set -e
-
-          mkdir -p artifact_data
-          unzip -o artifact.zip -d artifact_data
-
-          echo "===== EXTRACTED FILES ====="
-          find artifact_data -type f | sort
-
-      - name: Restore Master GZ
-        run: |
-          set -e
-
-          FOUND_FILE=$(find artifact_data -type f -name "bseb-12th-full-result-2026.json.gz" | head -n 1)
-
-          if [ -z "$FOUND_FILE" ]; then
-            echo "❌ Could not find bseb-12th-full-result-2026.json.gz inside artifact"
-            exit 1
-          fi
-
-          cp "$FOUND_FILE" bseb-12th-full-result-2026.json.gz
-
-          echo "===== RESTORED FILE ====="
-          ls -lh bseb-12th-full-result-2026.json.gz
-          du -h bseb-12th-full-result-2026.json.gz
-
-      - name: Light Validation Only
+      - name: Extract District Prefix
         run: |
           node - <<'EOF'
           const fs = require("fs");
+          const path = require("path");
+          const zlib = require("zlib");
+          const { pipeline } = require("stream");
+          const { parser } = require("stream-json");
+          const { pick } = require("stream-json/filters/Pick");
+          const { streamObject } = require("stream-json/streamers/StreamObject");
 
-          const file = "bseb-12th-full-result-2026.json.gz";
+          // =========================
+          // CONFIG
+          // =========================
+          const MASTER_GZ = "bseb-12th-full-result-2026.json.gz";
 
-          if (!fs.existsSync(file)) {
-            console.error("❌ Restored file missing");
+          const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
+
+          // CHANGE THESE EACH TIME
+          const DISTRICT_PREFIX = "11";
+          const DISTRICT_NAME = "patna";
+
+          const OUTPUT_JSON = path.join(
+            BASE_DIR,
+            `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
+          );
+
+          // =========================
+          // HELPERS
+          // =========================
+          function saveCustomJSON(file, data) {
+            const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
+            const lines = [];
+            lines.push("{");
+
+            rollCodes.forEach((rollCode, idx) => {
+              const students = data[rollCode] || {};
+              const rollNos = Object.keys(students).sort((a, b) => Number(a) - Number(b));
+
+              lines.push(`  ${JSON.stringify(rollCode)}: {`);
+
+              rollNos.forEach((rollNo, i) => {
+                const student = students[rollNo];
+                const json = JSON.stringify(student, null, 6)
+                  .split("\n")
+                  .map((line, lineIndex) => {
+                    if (lineIndex === 0) {
+                      return `    ${JSON.stringify(rollNo)}: ${line}`;
+                    }
+                    return `    ${line}`;
+                  })
+                  .join("\n");
+
+                lines.push(json + (i < rollNos.length - 1 ? "," : ""));
+              });
+
+              lines.push(`  }${idx < rollCodes.length - 1 ? "," : ""}`);
+            });
+
+            lines.push("}");
+            fs.writeFileSync(file, lines.join("\n"), "utf8");
+          }
+
+          function countStudents(data) {
+            let total = 0;
+            for (const rc of Object.keys(data)) {
+              total += Object.keys(data[rc] || {}).length;
+            }
+            return total;
+          }
+
+          // =========================
+          // START
+          // =========================
+          if (!fs.existsSync(MASTER_GZ)) {
+            console.error("❌ Master GZ file not found:", MASTER_GZ);
             process.exit(1);
           }
 
-          const raw = fs.readFileSync(file);
-
-          console.log("📦 Restored GZ Size:", raw.length, "bytes");
-
-          if (raw.length === 0) {
-            console.error("❌ Restored file is 0 bytes");
-            process.exit(1);
+          if (!fs.existsSync(BASE_DIR)) {
+            fs.mkdirSync(BASE_DIR, { recursive: true });
           }
 
-          const isGzip = raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b;
+          console.log("📂 Streaming master file...");
+          console.log("🔍 Filtering district prefix:", DISTRICT_PREFIX);
 
-          console.log("🗜️ GZIP Header Valid:", isGzip ? "YES" : "NO");
+          const districtData = {};
+          let matchedRollCodes = 0;
+          let extractedStudents = 0;
 
-          if (!isGzip) {
-            console.error("❌ Invalid gzip header");
+          const gunzip = zlib.createGunzip();
+          const jsonParser = parser();
+          const objectStreamer = streamObject();
+
+          objectStreamer.on("data", ({ key, value }) => {
+            if (!String(key).startsWith(DISTRICT_PREFIX)) return;
+
+            districtData[key] = value;
+            matchedRollCodes++;
+
+            const count = Object.keys(value || {}).length;
+            extractedStudents += count;
+
+            if (matchedRollCodes % 25 === 0) {
+              console.log(`📦 Roll Codes Extracted: ${matchedRollCodes} | Students: ${extractedStudents}`);
+            }
+          });
+
+          objectStreamer.on("end", () => {
+            console.log("💾 Saving district file...");
+            saveCustomJSON(OUTPUT_JSON, districtData);
+
+            console.log("✅ District extraction complete");
+            console.log("🏙️ District:", DISTRICT_NAME);
+            console.log("🔢 Prefix:", DISTRICT_PREFIX);
+            console.log("📚 Roll Codes:", matchedRollCodes);
+            console.log("🎓 Students:", extractedStudents);
+            console.log("📄 Saved to:", OUTPUT_JSON);
+          });
+
+          objectStreamer.on("error", (err) => {
+            console.error("❌ Stream parse failed:", err.message);
             process.exit(1);
-          }
+          });
 
-          console.log("✅ Recovery file looks valid enough to commit");
+          pipeline(
+            fs.createReadStream(MASTER_GZ),
+            gunzip,
+            jsonParser,
+            objectStreamer,
+            (err) => {
+              if (err) {
+                console.error("❌ Pipeline failed:", err.message);
+                process.exit(1);
+              }
+            }
+          );
           EOF
 
-      - name: Commit Restored File
+      - name: Validate Extracted District File
+        run: |
+          node - <<'EOF'
+          const fs = require("fs");
+          const path = require("path");
+
+          const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
+          const file = path.join(BASE_DIR, "patna-11-bseb-12th-full-result-2026.json");
+
+          if (!fs.existsSync(file)) {
+            console.error("❌ Extracted district file not found");
+            process.exit(1);
+          }
+
+          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+
+          let total = 0;
+          for (const rc of Object.keys(data)) {
+            total += Object.keys(data[rc] || {}).length;
+          }
+
+          console.log("✅ District JSON valid");
+          console.log("📚 Roll Codes:", Object.keys(data).length);
+          console.log("🎓 Students:", total);
+
+          const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
+          console.log("🔹 First Roll Code:", rollCodes[0] || "none");
+          console.log("🔹 Last Roll Code:", rollCodes[rollCodes.length - 1] || "none");
+          EOF
+
+      - name: Show Final Files
+        if: always()
+        run: |
+          echo "===== FINAL 12TH FOLDER ====="
+          ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
+
+          echo "===== FILE SIZE ====="
+          du -h "BSEB 12TH RESULT/Bseb 12th Result 2026/patna-11-bseb-12th-full-result-2026.json" || true
+
+      - name: Commit District File
+        if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add bseb-12th-full-result-2026.json.gz
-          git add .github/workflows/extract-12th-district.yml
+          git add "BSEB 12TH RESULT/Bseb 12th Result 2026/patna-11-bseb-12th-full-result-2026.json"
+          git add ".github/workflows/extract-12th-district.yml"
 
           git status
-          git commit -m "Recover valid 12th master file from artifact" || echo "No changes to commit"
+          git commit -m "Extract 12th Patna district data (11)" || echo "No changes to commit"
           git pull --rebase origin main || true
           git push
-
-      - name: Cleanup
-        if: always()
-        run: |
-          rm -rf artifact.zip artifact_data || true
