@@ -1,22 +1,16 @@
-name: Extract 12th District Data
+name: Check 12th Master vs District Totals
 
 on:
   workflow_dispatch:
 
 jobs:
-  extract:
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 360
-
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-          lfs: false
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -26,19 +20,19 @@ jobs:
       - name: Install Python Dependency
         run: pip install ijson
 
-      - name: Show Initial Files
+      - name: Show Files
         run: |
           echo "===== ROOT ====="
           ls -lah
 
-          echo "===== 12TH FOLDER ====="
+          echo "===== 12TH DISTRICT FOLDER ====="
           ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
 
           echo "===== MASTER FILE ====="
           ls -lh bseb-12th-full-result-2026.json.gz || true
           du -h bseb-12th-full-result-2026.json.gz || true
 
-      - name: Extract Multiple Districts
+      - name: Count Master + District Totals
         run: |
           python << 'EOF'
           import os
@@ -47,175 +41,92 @@ jobs:
           import ijson
 
           MASTER_GZ = "bseb-12th-full-result-2026.json.gz"
-          BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
+          DISTRICT_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
 
-          # =========================================
-          # EDIT ONLY THIS LIST WHEN NEEDED
-          # =========================================
-          DISTRICTS = [
-            ("91", "purnea"),
-            ("92", "araria"),
-            ("93", "kishanganj"),
-            ("94", "katihar"),
-          ]
-
-          def save_custom_json(file_path, data):
-              roll_codes = sorted(data.keys(), key=lambda x: int(x))
-
-              with open(file_path, "w", encoding="utf-8") as f:
-                  f.write("{\n")
-
-                  for rc_index, roll_code in enumerate(roll_codes):
-                      students = data.get(roll_code, {})
-                      roll_nos = sorted(students.keys(), key=lambda x: int(x))
-
-                      f.write(f'  "{roll_code}": {{\n')
-
-                      for rn_index, roll_no in enumerate(roll_nos):
-                          student = students[roll_no]
-                          student_json = json.dumps(student, ensure_ascii=False, indent=6)
-                          lines = student_json.splitlines()
-
-                          for line_index, line in enumerate(lines):
-                              if line_index == 0:
-                                  f.write(f'    "{roll_no}": {line}\n')
-                              else:
-                                  f.write(f'    {line}\n')
-
-                          if rn_index < len(roll_nos) - 1:
-                              f.write(",\n")
-
-                      f.write("\n  }")
-                      if rc_index < len(roll_codes) - 1:
-                          f.write(",")
-                      f.write("\n")
-
-                  f.write("}\n")
-
+          # =========================
+          # COUNT MASTER FILE
+          # =========================
           if not os.path.exists(MASTER_GZ):
-              print(f"❌ Master GZ file not found: {MASTER_GZ}")
+              print(f"❌ Master file not found: {MASTER_GZ}")
               raise SystemExit(1)
 
-          os.makedirs(BASE_DIR, exist_ok=True)
-
-          print("📂 Streaming master file once...")
-          print("📦 Districts to extract:", len(DISTRICTS))
-
-          # Prepare empty containers
-          district_data_map = {}
-          district_stats = {}
-
-          for prefix, name in DISTRICTS:
-              district_data_map[prefix] = {}
-              district_stats[prefix] = {
-                  "name": name,
-                  "roll_codes": 0,
-                  "students": 0
-              }
-
-          processed = 0
+          print("📂 Counting MASTER file...")
+          master_roll_codes = 0
+          master_students = 0
 
           with gzip.open(MASTER_GZ, "rb") as f:
               for roll_code, value in ijson.kvitems(f, ""):
-                  rc = str(roll_code)
+                  master_roll_codes += 1
+                  master_students += len(value or {})
 
-                  for prefix, name in DISTRICTS:
-                      if rc.startswith(prefix):
-                          district_data_map[prefix][rc] = value
-                          district_stats[prefix]["roll_codes"] += 1
-                          district_stats[prefix]["students"] += len(value or {})
-                          break
+                  if master_roll_codes % 100 == 0:
+                      print(f"📦 Master Progress | Roll Codes: {master_roll_codes} | Students: {master_students}")
 
-                  processed += 1
-                  if processed % 100 == 0:
-                      print(f"📚 Master Roll Codes Processed: {processed}")
+          print("\n✅ MASTER COUNT COMPLETE")
+          print("📚 Master Roll Codes:", master_roll_codes)
+          print("🎓 Master Students:", master_students)
 
-          print("💾 Saving district files...")
+          # =========================
+          # COUNT DISTRICT FILES
+          # =========================
+          print("\n📂 Counting DISTRICT files...")
 
-          for prefix, name in DISTRICTS:
-              output_json = os.path.join(
-                  BASE_DIR,
-                  f"{name}-{prefix}-bseb-12th-full-result-2026.json"
-              )
+          if not os.path.exists(DISTRICT_DIR):
+              print(f"❌ District folder not found: {DISTRICT_DIR}")
+              raise SystemExit(1)
 
-              save_custom_json(output_json, district_data_map[prefix])
+          district_files = sorted([
+              f for f in os.listdir(DISTRICT_DIR)
+              if f.endswith(".json") and "bseb-12th-full-result-2026" in f
+          ])
 
-              print("====================================")
-              print(f"✅ Saved: {name}-{prefix}")
-              print(f"📚 Roll Codes: {district_stats[prefix]['roll_codes']}")
-              print(f"🎓 Students: {district_stats[prefix]['students']}")
-              print(f"📄 File: {output_json}")
+          if not district_files:
+              print("❌ No district JSON files found")
+              raise SystemExit(1)
 
-          print("====================================")
-          print("🎉 ALL DISTRICT EXTRACTION COMPLETED")
-          EOF
+          total_district_roll_codes = 0
+          total_district_students = 0
 
-      - name: Validate Extracted District Files
-        run: |
-          python << 'EOF'
-          import os
-          import json
+          for file_name in district_files:
+              file_path = os.path.join(DISTRICT_DIR, file_name)
 
-          BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026"
-
-          DISTRICTS = [
-              ("91", "purnea"),
-            ("92", "araria"),
-            ("93", "kishanganj"),
-            ("94", "katihar"),
-          ]
-
-          print("===== VALIDATION START =====")
-
-          for prefix, name in DISTRICTS:
-              file = os.path.join(
-                  BASE_DIR,
-                  f"{name}-{prefix}-bseb-12th-full-result-2026.json"
-              )
-
-              if not os.path.exists(file):
-                  print(f"❌ Missing file: {file}")
-                  continue
-
-              with open(file, "r", encoding="utf-8") as f:
+              with open(file_path, "r", encoding="utf-8") as f:
                   data = json.load(f)
 
-              total = 0
-              for rc in data:
-                  total += len(data[rc] or {})
+              roll_code_count = len(data)
+              student_count = sum(len(data[rc] or {}) for rc in data)
 
-              roll_codes = sorted(data.keys(), key=lambda x: int(x))
+              total_district_roll_codes += roll_code_count
+              total_district_students += student_count
 
-              print("====================================")
-              print(f"✅ {name}-{prefix}")
-              print("📚 Roll Codes:", len(data))
-              print("🎓 Students:", total)
-              print("🔹 First Roll Code:", roll_codes[0] if roll_codes else "none")
-              print("🔹 Last Roll Code:", roll_codes[-1] if roll_codes else "none")
+              print(f"📄 {file_name}")
+              print(f"   📚 Roll Codes: {roll_code_count}")
+              print(f"   🎓 Students: {student_count}")
 
-          print("====================================")
-          print("🎉 VALIDATION COMPLETE")
+          print("\n✅ DISTRICT TOTAL COUNT COMPLETE")
+          print("📚 District Total Roll Codes:", total_district_roll_codes)
+          print("🎓 District Total Students:", total_district_students)
+
+          # =========================
+          # FINAL COMPARISON
+          # =========================
+          print("\n==============================")
+          print("FINAL COMPARISON")
+          print("==============================")
+          print("📚 Master Roll Codes:   ", master_roll_codes)
+          print("📚 District Roll Codes: ", total_district_roll_codes)
+          print("🎓 Master Students:     ", master_students)
+          print("🎓 District Students:   ", total_district_students)
+
+          roll_code_diff = master_roll_codes - total_district_roll_codes
+          student_diff = master_students - total_district_students
+
+          print("\n📊 Difference")
+          print("📚 Roll Code Difference:", roll_code_diff)
+          print("🎓 Student Difference:", student_diff)
+
+          if roll_code_diff == 0 and student_diff == 0:
+              print("\n🎉 PERFECT MATCH — ALL DATA EXTRACTED CORRECTLY")
+          else:
+              print("\n⚠️ MISMATCH FOUND — SOME DISTRICT FILES MAY BE MISSING OR INCOMPLETE")
           EOF
-
-      - name: Show Final Files
-        if: always()
-        run: |
-          echo "===== FINAL 12TH FOLDER ====="
-          ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
-
-          echo "===== ALL DISTRICT FILE SIZES ====="
-          find "BSEB 12TH RESULT/Bseb 12th Result 2026" -maxdepth 1 -name "*.json" -exec du -h {} \;
-
-      - name: Commit District Files
-        if: always()
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          find "BSEB 12TH RESULT/Bseb 12th Result 2026" -maxdepth 1 -name "*.json" -print0 | xargs -0 git add
-          git add ".github/workflows/extract-12th-multi-district.yml"
-
-          git status
-          git commit -m "Extract 12th district data batch 1" || echo "No changes to commit"
-          git pull --rebase origin main || true
-          git push
