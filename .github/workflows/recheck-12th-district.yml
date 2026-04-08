@@ -121,25 +121,26 @@ jobs:
           console.log("🔹 Last Roll Code:", rollCodes[rollCodes.length - 1] || "none");
           EOF
 
+       
       - name: Commit and Push
-    if: always()
-   run: |
-    git config --global user.name "github-actions[bot]"
-    git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        if: always() 
+        run: | 
+         git config --global user.name "github-actions[bot]"
+         git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-    # Clean npm junk so git stays clean
-    rm -rf node_modules
-    git restore package.json package-lock.json || true
+         # Clean npm junk so git stays clean
+         rm -rf node_modules
+         git restore package.json package-lock.json || true
 
-    # Add only required files
-    git add "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
-    git add "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
-    git add ".github/workflows/recheck-12th-district.yml"
+         # Add only required files
+         git add "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
+         git add "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
+         git add ".github/workflows/recheck-12th-district.yml"
 
-    git status
+         git status
 
-    git commit -m "Recheck 12th district result (${DISTRICT_NAME}-${DISTRICT_PREFIX})" || echo "No changes to commit"
+         git commit -m "Recheck 12th district result (${DISTRICT_NAME}-${DISTRICT_PREFIX})" || echo "No changes to commit"
 
-    git fetch origin main
-    git rebase origin/main || true
-    git push origin HEAD:main
+         git fetch origin main
+         git rebase origin/main || true
+         git push origin HEAD:main
