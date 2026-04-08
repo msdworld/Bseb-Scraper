@@ -30,7 +30,7 @@ jobs:
           echo "===== 12TH FOLDER ====="
           ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
 
-      - name: Extract District Prefix 42 (Siwan)
+      - name: Extract District Prefix
         run: |
           node - <<'EOF'
           const fs = require("fs");
@@ -41,10 +41,13 @@ jobs:
           // CONFIG
           // =========================
           const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
-          const INPUT_GZ = path.join(BASE_DIR, "bseb-12th-full-result-2026.json.gz");
 
+          // CHANGE THESE EACH TIME
           const DISTRICT_PREFIX = "11";
           const DISTRICT_NAME = "patna";
+
+          const INPUT_JSON = path.join(BASE_DIR, "bseb-12th-full-result-2026.json");
+          const INPUT_GZ = path.join(BASE_DIR, "bseb-12th-full-result-2026.json.gz");
 
           const OUTPUT_JSON = path.join(
             BASE_DIR,
@@ -54,39 +57,6 @@ jobs:
           // =========================
           // HELPERS
           // =========================
-          function saveCustomJSON(file, data) {
-            const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-            const lines = [];
-            lines.push("{");
-
-            rollCodes.forEach((rollCode, idx) => {
-              const students = data[rollCode] || {};
-              const rollNos = Object.keys(students).sort((a, b) => Number(a) - Number(b));
-
-              lines.push(`  ${JSON.stringify(rollCode)}: {`);
-
-              rollNos.forEach((rollNo, i) => {
-                const student = students[rollNo];
-                const json = JSON.stringify(student, null, 6)
-                  .split("\n")
-                  .map((line, lineIndex) => {
-                    if (lineIndex === 0) {
-                      return `    ${JSON.stringify(rollNo)}: ${line}`;
-                    }
-                    return `    ${line}`;
-                  })
-                  .join("\n");
-
-                lines.push(json + (i < rollNos.length - 1 ? "," : ""));
-              });
-
-              lines.push(`  }${idx < rollCodes.length - 1 ? "," : ""}`);
-            });
-
-            lines.push("}");
-            fs.writeFileSync(file, lines.join("\n"), "utf8");
-          }
-
           function countStudents(data) {
             let total = 0;
             for (const rc of Object.keys(data)) {
@@ -95,21 +65,116 @@ jobs:
             return total;
           }
 
+          function readMasterData() {
+            // 1) Prefer plain JSON if exists
+            if (fs.existsSync(INPUT_JSON)) {
+              console.log("📂 Reading master JSON...");
+              const text = fs.readFileSync(INPUT_JSON, "utf8");
+              return JSON.parse(text);
+            }
+
+            // 2) Otherwise try GZ safely
+            if (!fs.existsSync(INPUT_GZ)) {
+              throw new Error("Master file not found (.json or .json.gz)");
+            }
+
+            console.log("📂 Reading master GZ...");
+            const raw = fs.readFileSync(INPUT_GZ);
+
+            // Check if really gzip (magic bytes 1F 8B)
+            const isGzip = raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b;
+
+            let text = "";
+
+            if (isGzip) {
+              console.log("🗜️ Valid gzip detected");
+              text = zlib.gunzipSync(raw).toString("utf8");
+            } else {
+              console.log("⚠️ File has .gz extension but is actually plain JSON. Reading as text...");
+              text = raw.toString("utf8");
+            }
+
+            return JSON.parse(text);
+          }
+
+          function formatStudent(student, indent = "    ") {
+            const lines = [];
+            lines.push("{");
+            lines.push(`${indent}"studentName": ${JSON.stringify(student.studentName)},`);
+            lines.push(`${indent}"fatherName": ${JSON.stringify(student.fatherName)},`);
+            lines.push(`${indent}"regNumber": ${JSON.stringify(student.regNumber)},`);
+            lines.push(`${indent}"BSEBUniqueId": ${JSON.stringify(student.BSEBUniqueId)},`);
+            lines.push(`${indent}"schoolName": ${JSON.stringify(student.schoolName)},`);
+            lines.push(`${indent}"rollCode": ${JSON.stringify(student.rollCode)},`);
+            lines.push(`${indent}"rollNo": ${JSON.stringify(student.rollNo)},`);
+            lines.push(`${indent}"stream": ${JSON.stringify(student.stream)},`);
+            lines.push(`${indent}"totalMarks": ${JSON.stringify(student.totalMarks)},`);
+            lines.push(`${indent}"Division": ${JSON.stringify(student.Division)},`);
+            lines.push(`${indent}"subjects": [`);
+
+            const subjectLines = (student.subjects || []).map((sub) => {
+              const ordered = {};
+              ordered.subject = sub.subject;
+              ordered.FMarks = sub.FMarks;
+              ordered.PMarks = sub.PMarks;
+              ordered.theory = sub.theory;
+              if (sub.practical !== undefined) ordered.practical = sub.practical;
+              if (sub.regulationTheory !== undefined) ordered.regulationTheory = sub.regulationTheory;
+              if (sub.regulationPractical !== undefined) ordered.regulationPractical = sub.regulationPractical;
+              ordered.subTotal = sub.subTotal;
+              if (sub.extra !== undefined) ordered.extra = sub.extra;
+
+              return `${indent}  ${JSON.stringify(ordered)}`;
+            });
+
+            lines.push(subjectLines.join(",\n"));
+            lines.push(`${indent}]`);
+            lines.push("}");
+            return lines.join("\n");
+          }
+
+          function saveCustomJSON(file, data) {
+            const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
+            const fd = fs.openSync(file, "w");
+
+            try {
+              fs.writeSync(fd, "{\n");
+
+              rollCodes.forEach((rollCode, idx) => {
+                const students = data[rollCode] || {};
+                const rollNoKeys = Object.keys(students).sort((a, b) => Number(a) - Number(b));
+
+                fs.writeSync(fd, `  ${JSON.stringify(rollCode)}: {\n`);
+
+                rollNoKeys.forEach((rollNo, i) => {
+                  const student = students[rollNo];
+                  const formatted = formatStudent(student, "      ")
+                    .split("\n")
+                    .map((line, index) => (index === 0 ? `    ${JSON.stringify(rollNo)}: ${line}` : `    ${line}`))
+                    .join("\n");
+
+                  fs.writeSync(fd, formatted + (i < rollNoKeys.length - 1 ? ",\n" : "\n"));
+                });
+
+                fs.writeSync(fd, `  }${idx < rollCodes.length - 1 ? ",\n" : "\n"}`);
+              });
+
+              fs.writeSync(fd, "}\n");
+            } finally {
+              fs.closeSync(fd);
+            }
+          }
+
           // =========================
           // START
           // =========================
-          if (!fs.existsSync(INPUT_GZ)) {
-            console.error("❌ Master GZ file not found:");
-            console.error(INPUT_GZ);
-            process.exit(1);
-          }
+          const fullData = readMasterData();
 
-          console.log("📂 Reading master file...");
-          const raw = fs.readFileSync(INPUT_GZ);
-          const text = zlib.gunzipSync(raw).toString("utf8");
-          const fullData = JSON.parse(text);
+          console.log("✅ Master loaded");
+          console.log("📚 Total Roll Codes:", Object.keys(fullData).length);
+          console.log("🎓 Total Students:", countStudents(fullData));
 
-          console.log("🔍 Filtering district prefix:", DISTRICT_PREFIX);
+          console.log(`🔍 Filtering district prefix: ${DISTRICT_PREFIX}`);
 
           const districtData = {};
           let matchedRollCodes = 0;
@@ -120,17 +185,31 @@ jobs:
           for (const rollCode of allRollCodes) {
             if (!String(rollCode).startsWith(DISTRICT_PREFIX)) continue;
 
-            districtData[rollCode] = fullData[rollCode];
+            const students = fullData[rollCode] || {};
+            const sortedStudents = {};
+
+            Object.keys(students)
+              .sort((a, b) => Number(a) - Number(b))
+              .forEach((rollNo) => {
+                sortedStudents[rollNo] = students[rollNo];
+              });
+
+            districtData[rollCode] = sortedStudents;
             matchedRollCodes++;
 
-            const count = Object.keys(fullData[rollCode] || {}).length;
+            const count = Object.keys(sortedStudents).length;
             extractedStudents += count;
 
-            if (matchedRollCodes % 50 === 0) {
+            if (matchedRollCodes % 25 === 0) {
               console.log(`📦 Roll Codes Extracted: ${matchedRollCodes} | Students: ${extractedStudents}`);
             }
           }
 
+          if (matchedRollCodes === 0) {
+            console.log("⚠️ No roll codes found for this district prefix.");
+          }
+
+          console.log("💾 Saving district file...");
           saveCustomJSON(OUTPUT_JSON, districtData);
 
           console.log("✅ District extraction complete");
@@ -148,7 +227,13 @@ jobs:
           const path = require("path");
 
           const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
-          const file = path.join(BASE_DIR, "patna-11-bseb-12th-full-result-2026.json");
+          const DISTRICT_PREFIX = "11";
+          const DISTRICT_NAME = "patna";
+
+          const file = path.join(
+            BASE_DIR,
+            `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
+          );
 
           if (!fs.existsSync(file)) {
             console.error("❌ Extracted district file not found");
