@@ -30,8 +30,8 @@ const SAVE_EVERY_VALID_RESULTS = 100;
 // ===============================
 // DISTRICT CONFIG FROM ENV
 // ===============================
-const DISTRICT_PREFIX = process.env.DISTRICT_PREFIX || "11";
-const DISTRICT_NAME = process.env.DISTRICT_NAME || "patna";
+const DISTRICT_PREFIX = process.env.DISTRICT_PREFIX || "13";
+const DISTRICT_NAME = process.env.DISTRICT_NAME || "arabhojpur";
 
 const OUTPUT_FILE = path.join(
   BASE_DIR,
