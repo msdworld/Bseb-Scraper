@@ -15,7 +15,7 @@ const END_INDEX = 9999;         // district roll code slice end
 // PATHS
 // ===============================
 const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
-const VALID_ROLL_CODE_FILE = path.join(BASE_DIR, "bseb-12th-college-list-2026.json");
+const VALID_ROLL_CODE_FILE = path.join("bseb-12th-college-list-2026.json");
 const OUTPUT_FILE = path.join(
   BASE_DIR,
   `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
