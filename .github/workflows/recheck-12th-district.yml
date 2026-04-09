@@ -28,27 +28,23 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: npm ci || npm install
+        run: |
+          npm ci || npm install
 
       - name: Show Initial Files
         run: |
           echo "===== ROOT ====="
           ls -lah
 
-          echo "===== DISTRICT CONFIG ====="
-          echo "DISTRICT_PREFIX=$DISTRICT_PREFIX"
-          echo "DISTRICT_NAME=$DISTRICT_NAME"
-
           echo "===== 12TH FOLDER ====="
           ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
 
-          echo "===== DISTRICT FILE ====="
-          ls -lh "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json" || true
-          du -h "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json" || true
+          echo "===== DISTRICT CONFIG ====="
+          echo "DISTRICT_NAME=$DISTRICT_NAME"
+          echo "DISTRICT_PREFIX=$DISTRICT_PREFIX"
 
-          echo "===== COLLEGE LIST ====="
-          ls -lh bseb-12th-college-list-2026.json || true
-          du -h bseb-12th-college-list-2026.json || true
+          echo "===== TARGET OUTPUT FILE ====="
+          echo "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
 
       - name: Validate Existing District File
         run: |
@@ -58,34 +54,35 @@ jobs:
 
           const DISTRICT_PREFIX = process.env.DISTRICT_PREFIX;
           const DISTRICT_NAME = process.env.DISTRICT_NAME;
+          const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
+
           const file = path.join(
-            "BSEB 12TH RESULT/Bseb 12th Result 2026",
+            BASE_DIR,
             `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
           );
 
           if (!fs.existsSync(file)) {
-            console.log("⚠️ District file not found. Fresh district file will be created.");
+            console.log("⚠️ District file not found. New file will be created.");
             process.exit(0);
           }
 
-          try {
-            const data = JSON.parse(fs.readFileSync(file, "utf8"));
-            let total = 0;
-            for (const rc of Object.keys(data)) {
-              total += Object.keys(data[rc] || {}).length;
-            }
-
-            console.log("✅ Existing district JSON valid");
-            console.log("📚 Roll Codes:", Object.keys(data).length);
-            console.log("🎓 Students:", total);
-          } catch (e) {
-            console.error("❌ District file invalid:", e.message);
-            process.exit(1);
+          const data = JSON.parse(fs.readFileSync(file, "utf8"));
+          let total = 0;
+          for (const rc of Object.keys(data)) {
+            total += Object.keys(data[rc] || {}).length;
           }
+
+          console.log("✅ Existing district file valid");
+          console.log("📚 Roll Codes:", Object.keys(data).length);
+          console.log("🎓 Students:", total);
           EOF
 
-      - name: Run District Recheck Script
-        run: node "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
+      - name: Run Recheck Script
+        run: |
+          node "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
+        env:
+          DISTRICT_PREFIX: ${{ env.DISTRICT_PREFIX }}
+          DISTRICT_NAME: ${{ env.DISTRICT_NAME }}
 
       - name: Validate Final District File
         if: always()
@@ -96,13 +93,15 @@ jobs:
 
           const DISTRICT_PREFIX = process.env.DISTRICT_PREFIX;
           const DISTRICT_NAME = process.env.DISTRICT_NAME;
+          const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
+
           const file = path.join(
-            "BSEB 12TH RESULT/Bseb 12th Result 2026",
+            BASE_DIR,
             `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
           );
 
           if (!fs.existsSync(file)) {
-            console.error("❌ Final district file missing");
+            console.error("❌ Final district file not found");
             process.exit(1);
           }
 
@@ -121,26 +120,34 @@ jobs:
           console.log("🔹 Last Roll Code:", rollCodes[rollCodes.length - 1] || "none");
           EOF
 
-       
+      - name: Show Final Files
+        if: always()
+        run: |
+          echo "===== FINAL 12TH FOLDER ====="
+          ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
+
+          echo "===== TARGET FILE SIZE ====="
+          du -h "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json" || true
+
       - name: Commit and Push
-        if: always() 
-        run: | 
-         git config --global user.name "github-actions[bot]"
-         git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        if: always()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-         # Clean npm junk so git stays clean
-         rm -rf node_modules
-         git restore package.json package-lock.json || true
+          # Clean npm junk so git stays clean
+          rm -rf node_modules
+          git restore package.json package-lock.json || true
 
-         # Add only required files
-         git add "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
-         git add "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
-         git add ".github/workflows/recheck-12th-district.yml"
+          # Add only required files
+          git add "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
+          git add "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
+          git add ".github/workflows/recheck-12th-district.yml"
 
-         git status
+          git status
 
-         git commit -m "Recheck 12th district result (${DISTRICT_NAME}-${DISTRICT_PREFIX})" || echo "No changes to commit"
+          git commit -m "Recheck 12th district result (${DISTRICT_NAME}-${DISTRICT_PREFIX})" || echo "No changes to commit"
 
-         git fetch origin main
-         git rebase origin/main || true
-         git push origin HEAD:main
+          git fetch origin main
+          git rebase origin/main || true
+          git push origin HEAD:main
