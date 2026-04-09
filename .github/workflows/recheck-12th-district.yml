@@ -3,10 +3,6 @@ name: Recheck 12th District Result
 on:
   workflow_dispatch:
 
-env:
-  DISTRICT_PREFIX: "13"
-  DISTRICT_NAME: "arabhojpur"
-
 jobs:
   recheck:
     runs-on: ubuntu-latest
@@ -28,8 +24,7 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: |
-          npm ci || npm install
+        run: npm install
 
       - name: Show Initial Files
         run: |
@@ -39,85 +34,53 @@ jobs:
           echo "===== 12TH FOLDER ====="
           ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
 
-          echo "===== DISTRICT CONFIG ====="
-          echo "DISTRICT_NAME=$DISTRICT_NAME"
-          echo "DISTRICT_PREFIX=$DISTRICT_PREFIX"
-
-          echo "===== TARGET OUTPUT FILE ====="
-          echo "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
-
-      - name: Validate Existing District File
-        run: |
-          node - <<'EOF'
-          const fs = require("fs");
-          const path = require("path");
-
-          const DISTRICT_PREFIX = process.env.DISTRICT_PREFIX;
-          const DISTRICT_NAME = process.env.DISTRICT_NAME;
-          const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
-
-          const file = path.join(
-            BASE_DIR,
-            `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
-          );
-
-          if (!fs.existsSync(file)) {
-            console.log("⚠️ District file not found. New file will be created.");
-            process.exit(0);
-          }
-
-          const data = JSON.parse(fs.readFileSync(file, "utf8"));
-          let total = 0;
-          for (const rc of Object.keys(data)) {
-            total += Object.keys(data[rc] || {}).length;
-          }
-
-          console.log("✅ Existing district file valid");
-          console.log("📚 Roll Codes:", Object.keys(data).length);
-          console.log("🎓 Students:", total);
-          EOF
-
       - name: Run Recheck Script
         run: |
           node "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
-        env:
-          DISTRICT_PREFIX: ${{ env.DISTRICT_PREFIX }}
-          DISTRICT_NAME: ${{ env.DISTRICT_NAME }}
 
-      - name: Validate Final District File
+      - name: Validate District JSON
         if: always()
         run: |
-          node - <<'EOF'
+          node << 'EOF'
           const fs = require("fs");
           const path = require("path");
 
-          const DISTRICT_PREFIX = process.env.DISTRICT_PREFIX;
-          const DISTRICT_NAME = process.env.DISTRICT_NAME;
-          const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
+          const scriptPath = "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js";
+          const script = fs.readFileSync(scriptPath, "utf8");
+
+          const prefixMatch = script.match(/const DISTRICT_PREFIX = "([^"]+)"/);
+          const nameMatch = script.match(/const DISTRICT_NAME = "([^"]+)"/);
+
+          if (!prefixMatch || !nameMatch) {
+            console.log("❌ Could not read district config from script.js");
+            process.exit(1);
+          }
+
+          const DISTRICT_PREFIX = prefixMatch[1];
+          const DISTRICT_NAME = nameMatch[1];
 
           const file = path.join(
-            BASE_DIR,
+            "BSEB 12TH RESULT/Bseb 12th Result 2026",
             `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
           );
 
           if (!fs.existsSync(file)) {
-            console.error("❌ Final district file not found");
+            console.log("❌ District file not found:", file);
             process.exit(1);
           }
 
           const data = JSON.parse(fs.readFileSync(file, "utf8"));
+
           let total = 0;
           for (const rc of Object.keys(data)) {
             total += Object.keys(data[rc] || {}).length;
           }
 
-          console.log("✅ Final district JSON valid");
+          console.log("✅ District JSON valid");
+          console.log("🏙️ District:", DISTRICT_NAME);
+          console.log("🔢 Prefix:", DISTRICT_PREFIX);
           console.log("📚 Roll Codes:", Object.keys(data).length);
           console.log("🎓 Students:", total);
-
-          const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-          console.log("🔹 First Roll Code:", rollCodes[0] || "none");
-          console.log("🔹 Last Roll Code:", rollCodes[rollCodes.length - 1] || "none");
           EOF
 
       - name: Show Final Files
@@ -126,8 +89,34 @@ jobs:
           echo "===== FINAL 12TH FOLDER ====="
           ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
 
-          echo "===== TARGET FILE SIZE ====="
-          du -h "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json" || true
+          echo "===== DISTRICT FILE SIZE ====="
+          node << 'EOF'
+          const fs = require("fs");
+          const path = require("path");
+
+          const scriptPath = "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js";
+          const script = fs.readFileSync(scriptPath, "utf8");
+
+          const prefixMatch = script.match(/const DISTRICT_PREFIX = "([^"]+)"/);
+          const nameMatch = script.match(/const DISTRICT_NAME = "([^"]+)"/);
+
+          if (prefixMatch && nameMatch) {
+            const DISTRICT_PREFIX = prefixMatch[1];
+            const DISTRICT_NAME = nameMatch[1];
+            const file = path.join(
+              "BSEB 12TH RESULT/Bseb 12th Result 2026",
+              `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
+            );
+
+            if (fs.existsSync(file)) {
+              const stat = fs.statSync(file);
+              console.log("📄 File:", file);
+              console.log("📦 Size Bytes:", stat.size);
+            } else {
+              console.log("⚠️ File not found:", file);
+            }
+          }
+          EOF
 
       - name: Commit and Push
         if: always()
@@ -137,17 +126,26 @@ jobs:
 
           # Clean npm junk so git stays clean
           rm -rf node_modules
+
+          # Rebuild package files if npm changed them accidentally
           git restore package.json package-lock.json || true
 
-          # Add only required files
-          git add "BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
-          git add "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
-          git add ".github/workflows/recheck-12th-district.yml"
+          # Detect district file from script.js
+          DISTRICT_PREFIX=$(grep 'const DISTRICT_PREFIX =' "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js" | sed 's/.*= "\(.*\)".*/\1/')
+          DISTRICT_NAME=$(grep 'const DISTRICT_NAME =' "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js" | sed 's/.*= "\(.*\)".*/\1/')
+
+          DISTRICT_FILE="BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
+
+          echo "===== COMMIT TARGET ====="
+          echo "$DISTRICT_FILE"
+
+          [ -f "$DISTRICT_FILE" ] && git add "$DISTRICT_FILE"
+          [ -f "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js" ] && git add "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
+          [ -f ".github/workflows/recheck-12th-district.yml" ] && git add ".github/workflows/recheck-12th-district.yml"
 
           git status
 
           git commit -m "Recheck 12th district result (${DISTRICT_NAME}-${DISTRICT_PREFIX})" || echo "No changes to commit"
 
-          git fetch origin main
-          git rebase origin/main || true
-          git push origin HEAD:main
+          git pull --rebase origin main || true
+          git push || true
