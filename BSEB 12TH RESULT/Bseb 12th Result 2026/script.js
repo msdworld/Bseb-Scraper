@@ -4,22 +4,29 @@ const fs = require("fs");
 const path = require("path");
 
 // ===============================
+// DISTRICT CONFIG (EDIT ONLY THIS)
+// ===============================
+const DISTRICT_PREFIX = "13";   // e.g. 11, 12, 13, 42 etc
+const DISTRICT_NAME = "arabhojpur";  // e.g. patna, nalanda, bhojpur
+const START_INDEX = 0;          // district roll code slice start
+const END_INDEX = 9999;         // district roll code slice end
+
+// ===============================
+// PATHS
+// ===============================
+const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
+const VALID_ROLL_CODE_FILE = path.join(BASE_DIR, "bseb-12th-college-list-2026.json");
+const OUTPUT_FILE = path.join(
+  BASE_DIR,
+  `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
+);
+
+// ===============================
 // CONFIG
 // ===============================
 const BASE_URL = "https://interbiharboard.com/";
 const POST_URL = "https://interbiharboard.com/Result/GetResult";
 const SHOW_RESULT_URL = "https://interbiharboard.com/Result/ShowResult";
-
-const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
-const VALID_ROLL_CODE_FILE = path.join(BASE_DIR, "bseb-12th-college-list-2026.json");
-
-const DISTRICT_PREFIX = process.env.DISTRICT_PREFIX || "13";
-const DISTRICT_NAME = process.env.DISTRICT_NAME || "arabhojpur";
-
-const OUTPUT_FILE = path.join(
-  BASE_DIR,
-  `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
-);
 
 // Roll number range per roll code
 const ROLLNO_START = 26010001;
@@ -27,7 +34,7 @@ const ROLLNO_END = 26010999;
 
 // SPEED
 const ROLLCODE_PARALLEL = 10;
-const CONCURRENCY = 200;
+const CONCURRENCY = 100;
 const BATCH_SIZE = 50;
 const REQUEST_TIMEOUT = 7000;
 
@@ -114,79 +121,59 @@ function mergeCookies(oldCookieHeader, newSetCookies = []) {
     .join("; ");
 }
 
-// ===============================
-// CUSTOM JSON FORMATTER
-// ===============================
-function formatStudent(student, indent = "    ") {
-  const lines = [];
-  lines.push("{");
-  lines.push(`${indent}"studentName": ${JSON.stringify(student.studentName)},`);
-  lines.push(`${indent}"fatherName": ${JSON.stringify(student.fatherName)},`);
-  lines.push(`${indent}"regNumber": ${JSON.stringify(student.regNumber)},`);
-  lines.push(`${indent}"BSEBUniqueId": ${JSON.stringify(student.BSEBUniqueId)},`);
-  lines.push(`${indent}"schoolName": ${JSON.stringify(student.schoolName)},`);
-  lines.push(`${indent}"rollCode": ${JSON.stringify(student.rollCode)},`);
-  lines.push(`${indent}"rollNo": ${JSON.stringify(student.rollNo)},`);
-  lines.push(`${indent}"stream": ${JSON.stringify(student.stream)},`);
-  lines.push(`${indent}"totalMarks": ${JSON.stringify(student.totalMarks)},`);
-  lines.push(`${indent}"Division": ${JSON.stringify(student.Division)},`);
-  lines.push(`${indent}"subjects": [`);
-
-  const subjectLines = student.subjects.map((sub) => {
-    const ordered = {};
-    ordered.subject = sub.subject;
-    ordered.FMarks = sub.FMarks;
-    ordered.PMarks = sub.PMarks;
-    ordered.theory = sub.theory;
-    if (sub.practical !== undefined) ordered.practical = sub.practical;
-    if (sub.regulationTheory !== undefined) ordered.regulationTheory = sub.regulationTheory;
-    if (sub.regulationPractical !== undefined) ordered.regulationPractical = sub.regulationPractical;
-    ordered.subTotal = sub.subTotal;
-    if (sub.extra !== undefined) ordered.extra = sub.extra;
-
-    return `${indent}  ${JSON.stringify(ordered)}`;
-  });
-
-  lines.push(subjectLines.join(",\n"));
-  lines.push(`${indent}]`);
-  lines.push("}");
-  return lines.join("\n");
-}
-
-function saveCustomJSON(file, data) {
-  const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-  const lines = [];
-  lines.push("{");
-
-  rollCodes.forEach((rollCode, idx) => {
-    const students = data[rollCode] || {};
-    const rollNoKeys = Object.keys(students).sort((a, b) => Number(a) - Number(b));
-
-    lines.push(`  ${JSON.stringify(rollCode)}: {`);
-
-    rollNoKeys.forEach((rollNo, i) => {
-      const student = students[rollNo];
-      const formatted = formatStudent(student, "      ")
-        .split("\n")
-        .map((line, index) => (index === 0 ? `    ${JSON.stringify(rollNo)}: ${line}` : `    ${line}`))
-        .join("\n");
-
-      lines.push(formatted + (i < rollNoKeys.length - 1 ? "," : ""));
-    });
-
-    lines.push(`  }${idx < rollCodes.length - 1 ? "," : ""}`);
-  });
-
-  lines.push("}");
-  fs.writeFileSync(file, lines.join("\n"), "utf8");
-}
-
 function countTotalStudentsSaved(fullResults) {
   let total = 0;
   for (const rollCode of Object.keys(fullResults)) {
     total += Object.keys(fullResults[rollCode] || {}).length;
   }
   return total;
+}
+
+// ===============================
+// SAFE JSON WRITER (NO HUGE STRING)
+// ===============================
+function saveCustomJSON(file, data) {
+  const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
+
+  const fd = fs.openSync(file, "w");
+  try {
+    fs.writeSync(fd, "{\n");
+
+    rollCodes.forEach((rollCode, rcIndex) => {
+      const students = data[rollCode] || {};
+      const rollNos = Object.keys(students).sort((a, b) => Number(a) - Number(b));
+
+      fs.writeSync(fd, `  "${rollCode}": {\n`);
+
+      rollNos.forEach((rollNo, rnIndex) => {
+        const student = students[rollNo];
+        const studentJson = JSON.stringify(student, null, 6);
+        const lines = studentJson.split("\n");
+
+        lines.forEach((line, lineIndex) => {
+          if (lineIndex === 0) {
+            fs.writeSync(fd, `    "${rollNo}": ${line}\n`);
+          } else {
+            fs.writeSync(fd, `    ${line}\n`);
+          }
+        });
+
+        if (rnIndex < rollNos.length - 1) {
+          fs.writeSync(fd, ",\n");
+        }
+      });
+
+      fs.writeSync(fd, "\n  }");
+      if (rcIndex < rollCodes.length - 1) {
+        fs.writeSync(fd, ",");
+      }
+      fs.writeSync(fd, "\n");
+    });
+
+    fs.writeSync(fd, "}\n");
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 // ===============================
@@ -417,10 +404,14 @@ async function fetchStudentResult(rollCode, rollNo) {
 // ===============================
 function loadValidRollCodes() {
   const raw = loadJSON(VALID_ROLL_CODE_FILE, {});
-  return Object.keys(raw)
-    .filter(code => /^\d+$/.test(code))
-    .filter(code => code.startsWith(DISTRICT_PREFIX))
-    .sort((a, b) => Number(a) - Number(b));
+  const allCodes = Object.keys(raw).filter(code => /^\d+$/.test(code));
+  const filtered = allCodes.filter(code => code.startsWith(DISTRICT_PREFIX));
+
+  console.log(`📚 College list total roll codes: ${allCodes.length}`);
+  console.log(`🔍 Matching prefix ${DISTRICT_PREFIX}: ${filtered.length}`);
+  console.log(`🔹 First 10 matching: ${filtered.slice(0, 10).join(", ") || "none"}`);
+
+  return filtered.sort((a, b) => Number(a) - Number(b));
 }
 
 // ===============================
@@ -429,8 +420,8 @@ function loadValidRollCodes() {
 const saveState = {
   fullResults: {},
   totalStudentsSaved: 0,
-  unsavedValidCount: 0,
-  savedThisRun: 0
+  totalSavedThisRun: 0,
+  unsavedValidCount: 0
 };
 
 // ===============================
@@ -442,9 +433,9 @@ async function processRollCode(rollCode) {
   const existingRollNos = new Set(Object.keys(saveState.fullResults[rollCode] || {}));
   const alreadySavedForRollCode = existingRollNos.size;
 
-  let newSavedInThisRollCode = 0;
+  let newSavedForRollCode = 0;
 
-  console.log(`▶️ ${rollCode} | Already in file: ${alreadySavedForRollCode}`);
+  console.log(`▶️ Checking ${rollCode} | Already Saved: ${alreadySavedForRollCode}`);
 
   let currentRollNo = ROLLNO_START;
 
@@ -475,8 +466,8 @@ async function processRollCode(rollCode) {
 
             saveState.unsavedValidCount++;
             saveState.totalStudentsSaved++;
-            saveState.savedThisRun++;
-            newSavedInThisRollCode++;
+            saveState.totalSavedThisRun++;
+            newSavedForRollCode++;
 
             console.log(`${rollCode}-${String(rn).slice(-3)} student saved`);
           }
@@ -486,7 +477,7 @@ async function processRollCode(rollCode) {
       if (saveState.unsavedValidCount >= SAVE_EVERY_VALID_RESULTS) {
         saveCustomJSON(OUTPUT_FILE, saveState.fullResults);
         console.log(
-          `💾 Progress Saved | This Run: ${saveState.savedThisRun} | File Total: ${saveState.totalStudentsSaved}`
+          `💾 Progress Saved | This Run: ${saveState.totalSavedThisRun} | File Total: ${saveState.totalStudentsSaved}`
         );
         saveState.unsavedValidCount = 0;
       }
@@ -495,10 +486,10 @@ async function processRollCode(rollCode) {
     currentRollNo = batchEnd + 1;
   }
 
-  const finalTotalForRollCode = Object.keys(saveState.fullResults[rollCode] || {}).length;
+  const finalRollCodeTotal = Object.keys(saveState.fullResults[rollCode] || {}).length;
 
   console.log(
-    `✅ ${rollCode} | Already: ${alreadySavedForRollCode} | New: ${newSavedInThisRollCode} | Total: ${finalTotalForRollCode}`
+    `✅ ${rollCode} | Already: ${alreadySavedForRollCode} | New: ${newSavedForRollCode} | Total: ${finalRollCodeTotal}`
   );
 }
 
@@ -515,22 +506,31 @@ async function processRollCode(rollCode) {
     return;
   }
 
+  const selectedRollCodes = allValidRollCodes.slice(START_INDEX, END_INDEX + 1);
+
+  if (!selectedRollCodes.length) {
+    console.log(`❌ No roll codes found in selected split range ${START_INDEX}-${END_INDEX}`);
+    return;
+  }
+
   saveState.fullResults = loadJSON(OUTPUT_FILE, {});
   saveState.totalStudentsSaved = countTotalStudentsSaved(saveState.fullResults);
+  saveState.totalSavedThisRun = 0;
   saveState.unsavedValidCount = 0;
-  saveState.savedThisRun = 0;
 
   console.log(`🚀 12TH DISTRICT RECHECK STARTED`);
-  console.log(`🏙️ District: ${DISTRICT_NAME}`);
-  console.log(`🔢 Prefix: ${DISTRICT_PREFIX}`);
-  console.log(`📄 Output File: ${OUTPUT_FILE}`);
-  console.log(`📚 Roll Codes To Check: ${allValidRollCodes.length}`);
-  console.log(`📦 Already Saved In File: ${saveState.totalStudentsSaved}`);
-  console.log(`⚡ Parallel Roll Codes: ${ROLLCODE_PARALLEL}`);
-  console.log(`⚡ Concurrency per Roll Code: ${CONCURRENCY}`);
+  console.log(`🏙️ District Name: ${DISTRICT_NAME}`);
+  console.log(`🔢 District Prefix: ${DISTRICT_PREFIX}`);
+  console.log(`📚 Total district roll codes available: ${allValidRollCodes.length}`);
+  console.log(`📦 Split range: index ${START_INDEX} to ${END_INDEX}`);
+  console.log(`📦 Roll codes in this run: ${selectedRollCodes.length}`);
+  console.log(`📁 File already saved total: ${saveState.totalStudentsSaved}`);
+  console.log(`⚡ Parallel roll codes: ${ROLLCODE_PARALLEL}`);
+  console.log(`⚡ Concurrency per roll code: ${CONCURRENCY}`);
+  console.log(`💾 Output file: ${OUTPUT_FILE}`);
 
-  for (let i = 0; i < allValidRollCodes.length; i += ROLLCODE_PARALLEL) {
-    const rollCodeChunk = allValidRollCodes.slice(i, i + ROLLCODE_PARALLEL);
+  for (let i = 0; i < selectedRollCodes.length; i += ROLLCODE_PARALLEL) {
+    const rollCodeChunk = selectedRollCodes.slice(i, i + ROLLCODE_PARALLEL);
 
     console.log(`🚀 Roll code group: ${rollCodeChunk.join(", ")}`);
 
@@ -541,15 +541,15 @@ async function processRollCode(rollCode) {
     saveCustomJSON(OUTPUT_FILE, saveState.fullResults);
 
     console.log(
-      `💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, allValidRollCodes.length)}/${allValidRollCodes.length} | This Run: ${saveState.savedThisRun} | File Total: ${saveState.totalStudentsSaved}`
+      `💾 Group Saved | Completed: ${Math.min(i + ROLLCODE_PARALLEL, selectedRollCodes.length)}/${selectedRollCodes.length} | This Run: ${saveState.totalSavedThisRun} | File Total: ${saveState.totalStudentsSaved}`
     );
   }
 
   saveCustomJSON(OUTPUT_FILE, saveState.fullResults);
 
-  console.log(`🎉 12TH DISTRICT RECHECK COMPLETED`);
+  console.log(`🎉 DISTRICT RECHECK COMPLETED`);
   console.log(`🏙️ District: ${DISTRICT_NAME}`);
   console.log(`🔢 Prefix: ${DISTRICT_PREFIX}`);
-  console.log(`🆕 Total Saved This Run: ${saveState.savedThisRun}`);
-  console.log(`📦 Final Total In File: ${saveState.totalStudentsSaved}`);
+  console.log(`📦 Saved In This Run: ${saveState.totalSavedThisRun}`);
+  console.log(`📁 Final File Total: ${saveState.totalStudentsSaved}`);
 })();
