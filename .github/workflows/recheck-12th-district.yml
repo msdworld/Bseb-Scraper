@@ -1,4 +1,4 @@
-name: Recheck 12th District Result
+name: BSEB 12th District Recheck
 
 on:
   workflow_dispatch:
@@ -34,9 +34,12 @@ jobs:
           echo "===== 12TH FOLDER ====="
           ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
 
-      - name: Run Recheck Script
-        run: |
-          node "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
+          echo "===== COLLEGE LIST ====="
+          ls -lh bseb-12th-college-list-2026.json || true
+          du -h bseb-12th-college-list-2026.json || true
+
+      - name: Run District Script
+        run: node "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
 
       - name: Validate District JSON
         if: always()
@@ -45,24 +48,21 @@ jobs:
           const fs = require("fs");
           const path = require("path");
 
-          const scriptPath = "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js";
-          const script = fs.readFileSync(scriptPath, "utf8");
+          const SCRIPT_PATH = path.join("BSEB 12TH RESULT", "Bseb 12th Result 2026", "script.js");
+          const scriptText = fs.readFileSync(SCRIPT_PATH, "utf8");
 
-          const prefixMatch = script.match(/const DISTRICT_PREFIX = "([^"]+)"/);
-          const nameMatch = script.match(/const DISTRICT_NAME = "([^"]+)"/);
+          const prefixMatch = scriptText.match(/const DISTRICT_PREFIX = "([^"]+)"/);
+          const fileMatch = scriptText.match(/const OUTPUT_FILE_NAME = "([^"]+)"/);
 
-          if (!prefixMatch || !nameMatch) {
-            console.log("❌ Could not read district config from script.js");
+          if (!prefixMatch || !fileMatch) {
+            console.log("❌ Could not detect DISTRICT_PREFIX or OUTPUT_FILE_NAME from script.js");
             process.exit(1);
           }
 
           const DISTRICT_PREFIX = prefixMatch[1];
-          const DISTRICT_NAME = nameMatch[1];
+          const OUTPUT_FILE_NAME = fileMatch[1];
 
-          const file = path.join(
-            "BSEB 12TH RESULT/Bseb 12th Result 2026",
-            `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
-          );
+          const file = path.join("BSEB 12TH RESULT", "Bseb 12th Result 2026", OUTPUT_FILE_NAME);
 
           if (!fs.existsSync(file)) {
             console.log("❌ District file not found:", file);
@@ -77,10 +77,14 @@ jobs:
           }
 
           console.log("✅ District JSON valid");
-          console.log("🏙️ District:", DISTRICT_NAME);
           console.log("🔢 Prefix:", DISTRICT_PREFIX);
+          console.log("📁 File:", OUTPUT_FILE_NAME);
           console.log("📚 Roll Codes:", Object.keys(data).length);
           console.log("🎓 Students:", total);
+
+          const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
+          console.log("🔹 First Roll Code:", rollCodes[0] || "none");
+          console.log("🔹 Last Roll Code:", rollCodes[rollCodes.length - 1] || "none");
           EOF
 
       - name: Show Final Files
@@ -89,63 +93,37 @@ jobs:
           echo "===== FINAL 12TH FOLDER ====="
           ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
 
-          echo "===== DISTRICT FILE SIZE ====="
-          node << 'EOF'
-          const fs = require("fs");
-          const path = require("path");
-
-          const scriptPath = "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js";
-          const script = fs.readFileSync(scriptPath, "utf8");
-
-          const prefixMatch = script.match(/const DISTRICT_PREFIX = "([^"]+)"/);
-          const nameMatch = script.match(/const DISTRICT_NAME = "([^"]+)"/);
-
-          if (prefixMatch && nameMatch) {
-            const DISTRICT_PREFIX = prefixMatch[1];
-            const DISTRICT_NAME = nameMatch[1];
-            const file = path.join(
-              "BSEB 12TH RESULT/Bseb 12th Result 2026",
-              `${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json`
-            );
-
-            if (fs.existsSync(file)) {
-              const stat = fs.statSync(file);
-              console.log("📄 File:", file);
-              console.log("📦 Size Bytes:", stat.size);
-            } else {
-              console.log("⚠️ File not found:", file);
-            }
-          }
-          EOF
-
       - name: Commit and Push
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Clean npm junk so git stays clean
+          # clean npm junk
           rm -rf node_modules
 
-          # Rebuild package files if npm changed them accidentally
+          # restore package noise if changed
           git restore package.json package-lock.json || true
 
-          # Detect district file from script.js
-          DISTRICT_PREFIX=$(grep 'const DISTRICT_PREFIX =' "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js" | sed 's/.*= "\(.*\)".*/\1/')
-          DISTRICT_NAME=$(grep 'const DISTRICT_NAME =' "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js" | sed 's/.*= "\(.*\)".*/\1/')
+          # detect output file name from script
+          OUTPUT_FILE_NAME=$(node -e "
+            const fs = require('fs');
+            const text = fs.readFileSync('BSEB 12TH RESULT/Bseb 12th Result 2026/script.js','utf8');
+            const m = text.match(/const OUTPUT_FILE_NAME = \"([^\"]+)\"/);
+            console.log(m ? m[1] : '');
+          ")
 
-          DISTRICT_FILE="BSEB 12TH RESULT/Bseb 12th Result 2026/${DISTRICT_NAME}-${DISTRICT_PREFIX}-bseb-12th-full-result-2026.json"
+          echo "Detected district file: $OUTPUT_FILE_NAME"
 
-          echo "===== COMMIT TARGET ====="
-          echo "$DISTRICT_FILE"
+          if [ -n "$OUTPUT_FILE_NAME" ] && [ -f "BSEB 12TH RESULT/Bseb 12th Result 2026/$OUTPUT_FILE_NAME" ]; then
+            git add "BSEB 12TH RESULT/Bseb 12th Result 2026/$OUTPUT_FILE_NAME"
+          fi
 
-          [ -f "$DISTRICT_FILE" ] && git add "$DISTRICT_FILE"
-          [ -f "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js" ] && git add "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
-          [ -f ".github/workflows/recheck-12th-district.yml" ] && git add ".github/workflows/recheck-12th-district.yml"
+          git add "BSEB 12TH RESULT/Bseb 12th Result 2026/script.js"
+          git add ".github/workflows/bseb-12th-district-recheck.yml"
 
           git status
-
-          git commit -m "Recheck 12th district result (${DISTRICT_NAME}-${DISTRICT_PREFIX})" || echo "No changes to commit"
+          git commit -m "Recheck 12th district result" || echo "No changes to commit"
 
           git pull --rebase origin main || true
-          git push || true
+          git push
