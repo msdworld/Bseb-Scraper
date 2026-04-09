@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
 
 env:
-  DISTRICT_PREFIX: "11"
-  DISTRICT_NAME: "patna"
+  DISTRICT_PREFIX: "13"
+  DISTRICT_NAME: "arabhojpur"
 
 jobs:
   recheck:
