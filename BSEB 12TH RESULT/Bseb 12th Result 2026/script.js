@@ -26,7 +26,7 @@ const OUTPUT_FILE = path.join(
 );
 
 // College list file (must be inside same folder)
-const VALID_ROLL_CODE_FILE = path.join(BASE_DIR, "bseb-12th-college-list-2026.json");
+const VALID_ROLL_CODE_FILE = path.join("bseb-12th-college-list-2026.json");
 
 // Roll number range per roll code
 const ROLLNO_START = 26010001;
