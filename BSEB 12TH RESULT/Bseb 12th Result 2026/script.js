@@ -29,8 +29,8 @@ const OUTPUT_FILE = path.join(BASE_DIR, OUTPUT_FILE_NAME);
 // ===============================
 // ROLL RANGE
 // ===============================
-const ROLLNO_START = 26020001;
-const ROLLNO_END = 26020999;
+const ROLLNO_START = 26030001;
+const ROLLNO_END = 26030999;
 
 // ===============================
 // SPEED
