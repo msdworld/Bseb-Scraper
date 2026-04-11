@@ -17,8 +17,8 @@ const BASE_DIR = __dirname;
 // ===============================
 // EDIT ONLY THESE 2 EVERY RUN
 // ===============================
-const DISTRICT_PREFIX = "35";
-const OUTPUT_FILE_NAME = "westchamparan-35-bseb-12th-full-result-2026.json";
+const DISTRICT_PREFIX = "13";
+const OUTPUT_FILE_NAME = "arabhojpur-13-bseb-12th-full-result-2026.json";
 
 // ===============================
 // FILE PATHS
@@ -29,8 +29,8 @@ const OUTPUT_FILE = path.join(BASE_DIR, OUTPUT_FILE_NAME);
 // ===============================
 // ROLL RANGE
 // ===============================
-const ROLLNO_START = 26050001;
-const ROLLNO_END = 26050999;
+const ROLLNO_START = 26020001;
+const ROLLNO_END = 26020999;
 
 // ===============================
 // SPEED
