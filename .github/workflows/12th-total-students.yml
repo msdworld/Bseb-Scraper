@@ -1,0 +1,67 @@
+name: 12th Total Students Count
+
+on:
+  workflow_dispatch:
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Count Students from All District Files
+        run: |
+          node << 'EOF'
+          const fs = require("fs");
+          const path = require("path");
+
+          const BASE_DIR = "BSEB 12TH RESULT/Bseb 12th Result 2026";
+
+          if (!fs.existsSync(BASE_DIR)) {
+            console.log("❌ Directory not found:", BASE_DIR);
+            process.exit(1);
+          }
+
+          const files = fs.readdirSync(BASE_DIR)
+            .filter(f => f.endsWith("-bseb-12th-full-result-2026.json"));
+
+          if (!files.length) {
+            console.log("❌ No district files found");
+            process.exit(1);
+          }
+
+          let grandTotal = 0;
+
+          for (const file of files.sort()) {
+            const filePath = path.join(BASE_DIR, file);
+
+            try {
+              const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+
+              let count = 0;
+              for (const rc of Object.keys(data)) {
+                count += Object.keys(data[rc] || {}).length;
+              }
+
+              // Extract prefix (like 11, 12, 42 etc.)
+              const prefix = file.split("-")[1] || "??";
+
+              console.log(`${prefix} - ${count} students`);
+
+              grandTotal += count;
+
+            } catch (e) {
+              console.log(`❌ Error reading ${file}:`, e.message);
+            }
+          }
+
+          console.log("=================================");
+          console.log(`🎓 Final Total Students - ${grandTotal}`);
+          EOF
