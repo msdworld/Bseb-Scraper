@@ -123,7 +123,20 @@ jobs:
           git add ".github/workflows/bseb-12th-district-recheck.yml"
 
           git status
-          git commit -m "Recheck 12th district result" || echo "No changes to commit"
+          git commit -m "Recheck 12th district result ($OUTPUT_FILE_NAME)" || echo "No changes to commit"
 
-          git pull --rebase origin main || true
-          git push
+          # 🔥 SAFE SYNC FOR PARALLEL RUNS
+          echo "🔄 Syncing with remote..."
+          git fetch origin main
+
+          git rebase origin/main || {
+            echo "⚠️ Rebase failed, trying merge..."
+            git rebase --abort || true
+            git pull --no-rebase origin main || true
+          }
+
+          echo "🚀 Pushing..."
+          git push || {
+            echo "⚠️ Push failed, retrying with force..."
+            git push --force
+          }
