@@ -29,8 +29,13 @@ const OUTPUT_FILE = path.join(BASE_DIR, OUTPUT_FILE_NAME);
 // ===============================
 // ROLL RANGE
 // ===============================
-const ROLLNO_START = 26020001;
-const ROLLNO_END = 26020999;
+const RANGES = [
+  [26010001, 26010999],
+  [26020001, 26020999],
+  [26030001, 26030999],
+  [26040001, 26040999],
+  [26050001, 26050999]
+];
 
 // ===============================
 // SPEED
@@ -472,6 +477,10 @@ async function processRollCode(rollCode) {
     return;
   }
 
+  for (const [ROLLNO_START, ROLLNO_END] of RANGES) {
+
+  console.log(`Starting range: ${ROLLNO_START}-${ROLLNO_END}`);
+
   let currentRollNo = ROLLNO_START;
 
   while (currentRollNo <= ROLLNO_END) {
@@ -490,7 +499,6 @@ async function processRollCode(rollCode) {
         chunk.map(rn => fetchStudentResult(rollCode, rn, sessionData))
       );
 
-      // refresh session once if whole chunk failed
       if (results.length > 20 && results.every(r => !r.valid)) {
         try {
           sessionData = await getSessionData();
@@ -530,6 +538,9 @@ async function processRollCode(rollCode) {
 
     currentRollNo = batchEnd + 1;
   }
+
+  console.log(`Range: ${ROLLNO_START}-${ROLLNO_END} complete.`);
+}
 
   const finalTotalForRollCode = Object.keys(saveState.fullResults[rollCode] || {}).length;
 
