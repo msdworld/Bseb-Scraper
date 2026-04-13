@@ -17,7 +17,7 @@ const BASE_DIR = __dirname;
 // ===============================
 // EDIT ONLY THESE 2 EVERY RUN
 // ===============================
-const DISTRICT_PREFIX = "22";
+const DISTRICT_PREFIX = "23";
 const OUTPUT_FILE_NAME = "nawadah-23-bseb-12th-full-result-2026.json";
 
 // ===============================
