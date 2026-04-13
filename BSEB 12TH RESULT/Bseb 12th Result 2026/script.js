@@ -17,7 +17,7 @@ const BASE_DIR = __dirname;
 // ===============================
 // EDIT ONLY THESE 2 EVERY RUN
 // ===============================
-const DISTRICT_PREFIX = "35";
+const DISTRICT_PREFIX = "13";
 const OUTPUT_FILE_NAME = "arabhojpur-13-bseb-12th-full-result-2026.json";
 
 // ===============================
