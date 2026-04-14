@@ -1,0 +1,46 @@
+name: BSEB 12th Roll Code Finder
+
+on:
+  workflow_dispatch:
+
+jobs:
+  find-roll-codes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Show Files
+        run: |
+          echo "ROOT FILES:"
+          ls -lah
+          echo "RESULT FOLDER:"
+          ls -lah "BSEB 12TH RESULT/Bseb 12th Result 2026" || true
+
+      - name: Run Roll Code Finder
+        run: node "BSEB 12TH RESULT/Bseb 12th Result 2026/rollcodefind.js"
+
+      - name: Commit & Push
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add bseb-12th-roll-code-list.json || true
+
+          git commit -m "Update new roll codes" || echo "No changes"
+
+          git pull --rebase origin main || true
+          git push
