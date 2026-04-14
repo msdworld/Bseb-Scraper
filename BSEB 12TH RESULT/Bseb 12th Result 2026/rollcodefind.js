@@ -4,27 +4,25 @@ const fs = require("fs");
 const path = require("path");
 
 // ===============================
-// PATH SETUP
+// PATH
 // ===============================
-const ROOT_DIR = path.resolve(__dirname, "..", ".."); // main repo
-const BASE_DIR = __dirname;
+const ROOT_DIR = path.resolve(__dirname, "..", "..");
 
 // ===============================
-// CONFIG
+// URLS
 // ===============================
 const BASE_URL = "https://interbiharboard.com/";
 const POST_URL = "https://interbiharboard.com/Result/GetResult";
-
-const DISTRICT_PREFIX = "51"; // change when needed
+const SHOW_RESULT_URL = "https://interbiharboard.com/Result/ShowResult";
 
 // ===============================
-// FILES (ROOT LEVEL)
+// FILES (ROOT)
 // ===============================
 const COLLEGE_FILE = path.join(ROOT_DIR, "bseb-12th-college-list-2026.json");
 const OUTPUT_FILE = path.join(ROOT_DIR, "bseb-12th-roll-code-list.json");
 
 // ===============================
-// ROLLNO TEST RANGES
+// SMART TEST RANGES (ONLY 50)
 // ===============================
 const RANGES = [
   [26010001, 26010050],
@@ -43,9 +41,11 @@ const RANGES = [
 // ===============================
 const client = axios.create({
   timeout: 5000,
+  maxRedirects: 0,
   validateStatus: () => true,
   headers: {
     "User-Agent": "Mozilla/5.0",
+    "Accept": "*/*",
     "Content-Type": "application/x-www-form-urlencoded"
   }
 });
@@ -53,12 +53,16 @@ const client = axios.create({
 // ===============================
 // HELPERS
 // ===============================
-function loadJSON(file, fallback = {}) {
-  if (!fs.existsSync(file)) return fallback;
+function clean(txt) {
+  return (txt || "").replace(/\s+/g, " ").trim();
+}
+
+function loadJSON(file) {
+  if (!fs.existsSync(file)) return {};
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch {
-    return fallback;
+    return {};
   }
 }
 
@@ -66,9 +70,57 @@ function saveJSON(file, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
+function generateCaptcha() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
 function extractToken(html) {
   const $ = cheerio.load(html);
-  return $('input[name="__RequestVerificationToken"]').val() || "";
+  return clean($('input[name="__RequestVerificationToken"]').val() || "");
+}
+
+function mergeCookies(oldCookie, newSetCookies = []) {
+  const jar = {};
+
+  function add(str) {
+    if (!str) return;
+    str.split(";").forEach(p => {
+      const [k, ...rest] = p.trim().split("=");
+      if (k && rest.length) jar[k] = rest.join("=");
+    });
+  }
+
+  add(oldCookie);
+  newSetCookies.forEach(c => add(c.split(";")[0]));
+
+  return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+// ===============================
+// EXTRACT SCHOOL NAME (STRICT)
+// ===============================
+function extractSchoolName(html) {
+  const $ = cheerio.load(html);
+
+  let school = "";
+
+  $("table tr").each((_, row) => {
+    const tds = $(row).find("td");
+
+    if (tds.length === 2) {
+      const key = clean($(tds[0]).text()).toLowerCase();
+      const val = clean($(tds[1]).text());
+
+      if (
+        key.includes("school") ||
+        key.includes("college")
+      ) {
+        school = val;
+      }
+    }
+  });
+
+  return school;
 }
 
 // ===============================
@@ -77,46 +129,84 @@ function extractToken(html) {
 async function getSession() {
   const res = await client.get(BASE_URL);
 
-  const cookie = (res.headers["set-cookie"] || [])
+  const cookies = (res.headers["set-cookie"] || [])
     .map(c => c.split(";")[0])
     .join("; ");
 
   const token = extractToken(res.data);
 
-  return { cookie, token };
+  if (!token) throw new Error("Token failed");
+
+  return { cookies, token };
 }
 
 // ===============================
-// CHECK VALID
+// FETCH VALID RESULT (REAL)
 // ===============================
-async function checkRollCode(rollCode, rollNo, session) {
+async function fetchResult(rollCode, rollNo, session) {
   try {
     const payload = new URLSearchParams();
     payload.append("rollcode", rollCode);
     payload.append("rollno", rollNo);
-    payload.append("captcha", "123456");
+    payload.append("captcha", generateCaptcha());
     payload.append("__RequestVerificationToken", session.token);
 
-    const res = await client.post(POST_URL, payload.toString(), {
+    const postRes = await client.post(POST_URL, payload.toString(), {
       headers: {
-        Cookie: session.cookie,
-        Referer: BASE_URL
+        Cookie: session.cookies,
+        Referer: BASE_URL,
+        Origin: BASE_URL
       }
     });
 
-    const html = String(res.data || "").toLowerCase();
+    let cookie = mergeCookies(session.cookies, postRes.headers["set-cookie"]);
 
-    if (
-      html.includes("student") &&
-      html.includes("roll code") &&
-      html.includes("roll number")
-    ) {
-      return true;
+    let html = "";
+
+    // redirect case
+    if (postRes.status >= 300 && postRes.status < 400 && postRes.headers.location) {
+      const follow = await client.get(
+        "https://interbiharboard.com" + postRes.headers.location,
+        { headers: { Cookie: cookie } }
+      );
+      html = follow.data;
+    } else {
+      html = postRes.data;
     }
 
-    return false;
+    const lower = String(html).toLowerCase();
+
+    // fallback ShowResult
+    if (
+      lower.includes("enter roll code") &&
+      lower.includes("view result")
+    ) {
+      const showRes = await client.get(SHOW_RESULT_URL, {
+        headers: { Cookie: cookie }
+      });
+      html = showRes.data;
+    }
+
+    const htmlLower = String(html).toLowerCase();
+
+    if (
+      htmlLower.includes("invalid") ||
+      htmlLower.includes("not found") ||
+      htmlLower.includes("no record")
+    ) {
+      return null;
+    }
+
+    const schoolName = extractSchoolName(html);
+
+    if (schoolName && schoolName.length > 5) {
+      return schoolName;
+    }
+
+    return null;
+
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -125,51 +215,50 @@ async function checkRollCode(rollCode, rollNo, session) {
 // ===============================
 (async () => {
   console.log("🚀 ROLL CODE FINDER STARTED");
-  console.log(`🔢 Prefix: ${DISTRICT_PREFIX}`);
 
-  const collegeList = loadJSON(COLLEGE_FILE, {});
-  const existingCodes = new Set(Object.keys(collegeList));
+  const collegeList = loadJSON(COLLEGE_FILE);
+  const outputData = loadJSON(OUTPUT_FILE);
 
-  const outputData = loadJSON(OUTPUT_FILE, {});
-  const newCodes = new Set(Object.keys(outputData));
+  const existing = new Set(Object.keys(collegeList));
+  const discovered = new Set(Object.keys(outputData));
 
-  console.log(`📚 Already in college list: ${existingCodes.size}`);
-  console.log(`📂 Already found new codes: ${newCodes.size}`);
+  console.log(`📚 Existing: ${existing.size}`);
+  console.log(`🆕 Already Found: ${discovered.size}`);
 
-  const session = await getSession();
+  let session = await getSession();
 
   let found = 0;
 
-  for (let rc = Number(DISTRICT_PREFIX) * 1000; rc < Number(DISTRICT_PREFIX) * 1000 + 999; rc++) {
+  for (let rc = 11001; rc <= 99999; rc++) {
     const rollCode = String(rc);
 
-    if (existingCodes.has(rollCode) || newCodes.has(rollCode)) continue;
+    if (existing.has(rollCode) || discovered.has(rollCode)) continue;
 
     for (const [start, end] of RANGES) {
-      let isValid = false;
+
+      let foundHere = false;
 
       for (let rn = start; rn <= end; rn++) {
-        const ok = await checkRollCode(rollCode, rn, session);
+        const school = await fetchResult(rollCode, rn, session);
 
-        if (ok) {
-          isValid = true;
+        if (school) {
+          outputData[rollCode] = school;
+          discovered.add(rollCode);
+
+          console.log(`✅ ${rollCode} | ${school}`);
+
+          saveJSON(OUTPUT_FILE, outputData);
+
+          found++;
+          foundHere = true;
           break;
         }
       }
 
-      if (isValid) {
-        outputData[rollCode] = "Unknown College";
-        newCodes.add(rollCode);
-        found++;
-
-        console.log(`✅ New RollCode Found: ${rollCode}`);
-
-        saveJSON(OUTPUT_FILE, outputData);
-        break;
-      }
+      if (foundHere) break;
     }
   }
 
   console.log("🎉 DONE");
-  console.log(`🆕 New Roll Codes Found: ${found}`);
+  console.log(`🆕 Total New Roll Codes: ${found}`);
 })();
