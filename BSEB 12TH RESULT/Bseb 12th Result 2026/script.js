@@ -44,10 +44,10 @@ const RANGES = [
 // ===============================
 // SPEED
 // ===============================
-const ROLLCODE_PARALLEL = 20;
-const CONCURRENCY = 200;
-const BATCH_SIZE = 200;
-const REQUEST_TIMEOUT = 5000;
+const ROLLCODE_PARALLEL = 10;
+const CONCURRENCY = 100;
+const BATCH_SIZE = 100;
+const REQUEST_TIMEOUT = 6000;
 
 // ===============================
 // SAVE
