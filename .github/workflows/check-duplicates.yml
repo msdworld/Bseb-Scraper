@@ -20,7 +20,7 @@ jobs:
           // ===============================
           // 👉 CHANGE FILE NAME HERE ONLY
           // ===============================
-          const FILE_NAME = "jamui-82-bseb-12th-full-result-2026.json";
+          const FILE_NAME = "araria-92-bseb-12th-full-result-2026.json";
 
           const filePath = path.join(
             "BSEB 12TH RESULT",
