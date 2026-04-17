@@ -1,0 +1,61 @@
+name: Check Duplicate Roll Numbers
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check-duplicates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Check Duplicates
+        run: |
+          node << 'EOF'
+          const fs = require("fs");
+          const path = require("path");
+
+          // ===============================
+          // 👉 CHANGE FILE NAME HERE ONLY
+          // ===============================
+          const FILE_NAME = "jamui-82-bseb-12th-full-result-2026.json";
+
+          const filePath = path.join(
+            "BSEB 12TH RESULT",
+            "Bseb 12th Result 2026",
+            FILE_NAME
+          );
+
+          if (!fs.existsSync(filePath)) {
+            console.log("❌ File not found:", filePath);
+            process.exit(1);
+          }
+
+          const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+
+          let duplicateFound = false;
+          let totalDuplicates = 0;
+
+          for (const rollCode of Object.keys(data)) {
+            const rollNos = Object.keys(data[rollCode] || {});
+            const seen = new Set();
+
+            for (const rn of rollNos) {
+              if (seen.has(rn)) {
+                console.log(`❌ DUPLICATE → RollCode: ${rollCode} | RollNo: ${rn}`);
+                duplicateFound = true;
+                totalDuplicates++;
+              } else {
+                seen.add(rn);
+              }
+            }
+          }
+
+          if (!duplicateFound) {
+            console.log("✅ No duplicate roll numbers found in this file");
+          } else {
+            console.log(`⚠️ Total duplicates found: ${totalDuplicates}`);
+          }
+          EOF
