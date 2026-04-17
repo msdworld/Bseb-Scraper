@@ -17,8 +17,8 @@ const BASE_DIR = __dirname;
 // ===============================
 // EDIT ONLY THESE 2 EVERY RUN
 // ===============================
-const DISTRICT_PREFIX = "24";
-const OUTPUT_FILE_NAME = "aurangabad-24-bseb-12th-full-result-2026.json";
+const DISTRICT_PREFIX = "72";
+const OUTPUT_FILE_NAME = "banka-72-bseb-12th-full-result-2026.json";
 
 // ===============================
 // FILE PATHS
@@ -39,7 +39,7 @@ const RANGES = [
 // ===============================
 // SPEED
 // ===============================
-const ROLLCODE_PARALLEL = 20;
+const ROLLCODE_PARALLEL = 10;
 const CONCURRENCY = 100;
 const BATCH_SIZE = 100;
 const REQUEST_TIMEOUT = 6000;
