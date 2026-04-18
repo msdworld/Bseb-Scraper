@@ -17,8 +17,8 @@ const BASE_DIR = __dirname;
 // ===============================
 // EDIT ONLY THESE 2 EVERY RUN
 // ===============================
-const DISTRICT_PREFIX = "61";
-const OUTPUT_FILE_NAME = "saharsa-61-bseb-12th-full-result-2026.json";
+const DISTRICT_PREFIX = "17";
+const OUTPUT_FILE_NAME = "patna2-17-bseb-12th-full-result-2026.json";
 
 // ===============================
 // FILE PATHS
@@ -31,8 +31,8 @@ const OUTPUT_FILE = path.join(BASE_DIR, OUTPUT_FILE_NAME);
 // ===============================
 const RANGES = [
   [26010001, 26010999],
-  [26020001, 26020999],
-  [26030001, 26030999]
+  [26020001, 26020999]
+
   
 ];
 
