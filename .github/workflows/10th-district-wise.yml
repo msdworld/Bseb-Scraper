@@ -214,7 +214,7 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           find "BSEB 10TH RESULT/Bseb 10th Result 2026" -maxdepth 1 -name "*.json" -print0 | xargs -0 git add
-          git add ".github/workflows/extract-10th-district.yml"
+          git add ".github/workflows/10th-district-wise.yml"
 
           git status
           git commit -m "Extract 10th district data batch 1" || echo "No changes to commit"
