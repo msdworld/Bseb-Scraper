@@ -1,4 +1,4 @@
-name: BSEB 10th District Wise Extraction
+name: BSEB 10th District Wise Extraction (Stream)
 
 on:
   workflow_dispatch:
@@ -14,31 +14,24 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Run Extraction Script
+      - name: Run Stream Extraction
         run: |
           node << 'EOF'
           const fs = require("fs");
           const path = require("path");
           const zlib = require("zlib");
+          const readline = require("readline");
 
-          console.log("🚀 BSEB 10TH DISTRICT EXTRACTION STARTED (GZIP)");
+          console.log("🚀 STREAM EXTRACTION STARTED");
 
-          // ===============================
-          // 📁 INPUT FILE (.gz)
-          // ===============================
-          const MAIN_FILE = "bseb-10th-full-result-2026.json.gz";
+          const INPUT_FILE = "bseb-10th-full-result-2026.json.gz";
 
-          // ===============================
-          // 📂 OUTPUT DIRECTORY
-          // ===============================
           const OUTPUT_DIR = path.join(
             "BSEB 10TH RESULT",
             "Bseb 10th Result 2026"
@@ -48,103 +41,123 @@ jobs:
             fs.mkdirSync(OUTPUT_DIR, { recursive: true });
           }
 
-          // ===============================
-          // 🗺️ DISTRICT MAP
-          // ===============================
           const DISTRICT_MAP = {
             "21": "munger",
             "11": "purnea",
             "12": "araria",
             "13": "kishanganj",
             "14": "katihar"
-            // 👉 add all prefixes
           };
 
-          // ===============================
-          // LOAD + DECOMPRESS
-          // ===============================
-          if (!fs.existsSync(MAIN_FILE)) {
-            console.log("❌ File not found:", MAIN_FILE);
-            process.exit(1);
+          const writers = {};
+
+          function getWriter(prefix) {
+            if (!writers[prefix]) {
+              const name = DISTRICT_MAP[prefix] || `district-${prefix}`;
+              const file = path.join(
+                OUTPUT_DIR,
+                `${name}-${prefix}-bseb-10th-full-result-2026.json`
+              );
+
+              const stream = fs.createWriteStream(file);
+              stream.write("{\n");
+
+              writers[prefix] = {
+                stream,
+                first: true,
+                count: 0
+              };
+
+              console.log(`📁 Creating file: ${file}`);
+            }
+            return writers[prefix];
           }
 
-          console.log("📦 Reading compressed file...");
+          function writeStudent(prefix, key, student) {
+            const writer = getWriter(prefix);
 
-          const compressed = fs.readFileSync(MAIN_FILE);
+            const line = `  "${key}": ${JSON.stringify(student)}`;
 
-          console.log("📦 Decompressing...");
+            if (!writer.first) {
+              writer.stream.write(",\n");
+            }
 
-          const decompressed = zlib.gunzipSync(compressed);
+            writer.stream.write(line);
 
-          console.log("📦 Parsing JSON...");
+            writer.first = false;
+            writer.count++;
+          }
 
-          const mainData = JSON.parse(decompressed.toString("utf8"));
+          const gunzip = zlib.createGunzip();
+          const stream = fs.createReadStream(INPUT_FILE).pipe(gunzip);
 
-          console.log("📊 Total students:", Object.keys(mainData).length);
+          const rl = readline.createInterface({
+            input: stream,
+            crlfDelay: Infinity
+          });
 
-          // ===============================
-          // GROUPING
-          // ===============================
-          const districtData = {};
+          let total = 0;
 
-          for (const key of Object.keys(mainData)) {
-            const student = mainData[key];
+          rl.on("line", (line) => {
+            line = line.trim();
+
+            if (!line || line === "{" || line === "}") return;
+
+            // remove comma at end
+            if (line.endsWith(",")) {
+              line = line.slice(0, -1);
+            }
+
+            const match = line.match(/^"(\d+)":\s*(\{.*\})$/);
+
+            if (!match) return;
+
+            const key = match[1];
+
+            let student;
+            try {
+              student = JSON.parse(match[2]);
+            } catch {
+              return;
+            }
 
             const rollCode = String(student.rollCode || "");
-            if (rollCode.length < 2) continue;
+            if (rollCode.length < 2) return;
 
             const prefix = rollCode.substring(0, 2);
 
-            if (!districtData[prefix]) {
-              districtData[prefix] = {};
+            writeStudent(prefix, key, student);
+
+            total++;
+
+            if (total % 50000 === 0) {
+              console.log(`📊 Processed: ${total}`);
+            }
+          });
+
+          rl.on("close", () => {
+            for (const prefix of Object.keys(writers)) {
+              const w = writers[prefix];
+              w.stream.write("\n}\n");
+              w.stream.end();
+
+              console.log(`✅ ${prefix} → ${w.count} students`);
             }
 
-            if (!districtData[prefix][key]) {
-              districtData[prefix][key] = student;
-            }
-          }
-
-          // ===============================
-          // SAVE FILES
-          // ===============================
-          let totalFiles = 0;
-          let totalStudents = 0;
-
-          for (const prefix of Object.keys(districtData)) {
-
-            const districtName = DISTRICT_MAP[prefix] || `district-${prefix}`;
-
-            const fileName = `${districtName}-${prefix}-bseb-10th-full-result-2026.json`;
-
-            const filePath = path.join(OUTPUT_DIR, fileName);
-
-            fs.writeFileSync(
-              filePath,
-              JSON.stringify(districtData[prefix], null, 2)
-            );
-
-            const count = Object.keys(districtData[prefix]).length;
-
-            console.log(`✅ Saved: ${fileName} | Students: ${count}`);
-
-            totalFiles++;
-            totalStudents += count;
-          }
-
-          console.log("🎉 EXTRACTION COMPLETED");
-          console.log("📁 Total District Files:", totalFiles);
-          console.log("🎓 Total Students Written:", totalStudents);
+            console.log("🎉 DONE");
+            console.log(`🎓 Total processed: ${total}`);
+          });
 
           EOF
 
-      - name: Commit & Push Files
+      - name: Commit & Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           git add "BSEB 10TH RESULT/Bseb 10th Result 2026"
 
-          git commit -m "10th district-wise extraction (gz)" || echo "No changes"
+          git commit -m "10th district-wise extraction (stream)" || echo "No changes"
 
           git pull --rebase origin main || true
           git push
