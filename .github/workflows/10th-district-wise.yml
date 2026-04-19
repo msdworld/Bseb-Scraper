@@ -1,4 +1,4 @@
-name: BSEB 10th District Wise Extraction (Robust Stream)
+name: Extract 10th District Data
 
 on:
   workflow_dispatch:
@@ -14,156 +14,209 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          persist-credentials: true
+          lfs: false
 
-      - name: Run Robust Extraction
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python Dependency
+        run: pip install ijson
+
+      - name: Show Initial Files
         run: |
-          node << 'EOF'
-          const fs = require("fs");
-          const path = require("path");
-          const zlib = require("zlib");
+          echo "===== ROOT ====="
+          ls -lah
 
-          console.log("🚀 ROBUST EXTRACTION STARTED");
+          echo "===== 10TH FOLDER ====="
+          ls -lah "BSEB 10TH RESULT/Bseb 10th Result 2026" || true
 
-          const INPUT_FILE = "bseb-10th-full-result-2026.json.gz";
+          echo "===== MASTER FILE ====="
+          ls -lh bseb-10th-full-result-2026.json.gz || true
+          du -h bseb-10th-full-result-2026.json.gz || true
 
-          const OUTPUT_DIR = path.join(
-            "BSEB 10TH RESULT",
-            "Bseb 10th Result 2026"
-          );
+      - name: Extract Multiple Districts
+        run: |
+          python << 'EOF'
+          import os
+          import gzip
+          import json
+          import ijson
 
-          if (!fs.existsSync(OUTPUT_DIR)) {
-            fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-          }
+          MASTER_GZ = "bseb-10th-full-result-2026.json.gz"
+          BASE_DIR = "BSEB 10TH RESULT/Bseb 10th Result 2026"
 
-          const DISTRICT_MAP = {
-            "21": "munger",
-            "11": "purnea",
-            "12": "araria",
-            "13": "kishanganj",
-            "14": "katihar"
-          };
+          # =========================================
+          # EDIT DISTRICTS HERE
+          # =========================================
+          DISTRICTS = [
+              ("11", "purnea"),
+              ("12", "araria"),
+              ("13", "kishanganj"),
+              ("14", "katihar"),
+              ("92", "siwan"),
+          ]
 
-          const writers = {};
+          def save_custom_json(file_path, data):
+              roll_codes = sorted(data.keys(), key=lambda x: int(x))
 
-          function getWriter(prefix) {
-            if (!writers[prefix]) {
-              const name = DISTRICT_MAP[prefix] || `district-${prefix}`;
-              const file = path.join(
-                OUTPUT_DIR,
-                `${name}-${prefix}-bseb-10th-full-result-2026.json`
-              );
+              with open(file_path, "w", encoding="utf-8") as f:
+                  f.write("{\n")
 
-              const stream = fs.createWriteStream(file);
-              stream.write("{\n");
+                  for rc_index, roll_code in enumerate(roll_codes):
+                      students = data.get(roll_code, {})
+                      roll_nos = sorted(students.keys(), key=lambda x: int(x))
 
-              writers[prefix] = {
-                stream,
-                first: true,
-                count: 0
-              };
+                      f.write(f'  "{roll_code}": {{\n')
 
-              console.log(`📁 Creating file: ${file}`);
-            }
-            return writers[prefix];
-          }
+                      for rn_index, roll_no in enumerate(roll_nos):
+                          student = students[roll_no]
+                          student_json = json.dumps(student, ensure_ascii=False, indent=6)
+                          lines = student_json.splitlines()
 
-          function writeStudent(prefix, key, student) {
-            const writer = getWriter(prefix);
+                          for line_index, line in enumerate(lines):
+                              if line_index == 0:
+                                  f.write(f'    "{roll_no}": {line}\n')
+                              else:
+                                  f.write(f'    {line}\n')
 
-            const line = `  "${key}": ${JSON.stringify(student)}`;
+                          if rn_index < len(roll_nos) - 1:
+                              f.write(",\n")
 
-            if (!writer.first) {
-              writer.stream.write(",\n");
-            }
+                      f.write("\n  }")
+                      if rc_index < len(roll_codes) - 1:
+                          f.write(",")
+                      f.write("\n")
 
-            writer.stream.write(line);
+                  f.write("}\n")
 
-            writer.first = false;
-            writer.count++;
-          }
+          if not os.path.exists(MASTER_GZ):
+              print(f"❌ Master GZ file not found: {MASTER_GZ}")
+              raise SystemExit(1)
 
-          const gunzip = zlib.createGunzip();
-          const stream = fs.createReadStream(INPUT_FILE).pipe(gunzip);
+          os.makedirs(BASE_DIR, exist_ok=True)
 
-          let buffer = "";
-          let currentKey = null;
-          let braceCount = 0;
+          print("📂 Streaming master file once...")
+          print("📦 Districts to extract:", len(DISTRICTS))
 
-          let total = 0;
+          district_data_map = {}
+          district_stats = {}
 
-          stream.on("data", chunk => {
-            buffer += chunk.toString();
-
-            while (true) {
-              if (!currentKey) {
-                const keyMatch = buffer.match(/"(\d+)"\s*:\s*\{/);
-                if (!keyMatch) break;
-
-                currentKey = keyMatch[1];
-
-                const startIndex = buffer.indexOf(keyMatch[0]);
-                buffer = buffer.slice(startIndex + keyMatch[0].length - 1);
-
-                braceCount = 1;
+          for prefix, name in DISTRICTS:
+              district_data_map[prefix] = {}
+              district_stats[prefix] = {
+                  "name": name,
+                  "roll_codes": 0,
+                  "students": 0
               }
 
-              let i = 0;
-              for (; i < buffer.length; i++) {
-                if (buffer[i] === "{") braceCount++;
-                else if (buffer[i] === "}") braceCount--;
+          processed = 0
 
-                if (braceCount === 0) {
-                  const objStr = buffer.slice(0, i + 1);
+          with gzip.open(MASTER_GZ, "rb") as f:
+              for roll_code, value in ijson.kvitems(f, ""):
+                  rc = str(roll_code)
 
-                  try {
-                    const student = JSON.parse(objStr);
+                  for prefix, name in DISTRICTS:
+                      if rc.startswith(prefix):
+                          district_data_map[prefix][rc] = value
+                          district_stats[prefix]["roll_codes"] += 1
+                          district_stats[prefix]["students"] += len(value or {})
+                          break
 
-                    const rollCode = String(student.rollCode || "");
-                    if (rollCode.length >= 2) {
-                      const prefix = rollCode.substring(0, 2);
-                      writeStudent(prefix, currentKey, student);
-                      total++;
-                    }
-                  } catch {}
+                  processed += 1
+                  if processed % 100 == 0:
+                      print(f"📚 Master Roll Codes Processed: {processed}")
 
-                  buffer = buffer.slice(i + 1);
-                  currentKey = null;
-                  break;
-                }
-              }
+          print("💾 Saving district files...")
 
-              if (braceCount !== 0) break;
-            }
-          });
+          for prefix, name in DISTRICTS:
+              output_json = os.path.join(
+                  BASE_DIR,
+                  f"{name}-{prefix}-bseb-10th-full-result-2026.json"
+              )
 
-          stream.on("end", () => {
-            for (const prefix of Object.keys(writers)) {
-              const w = writers[prefix];
-              w.stream.write("\n}\n");
-              w.stream.end();
+              save_custom_json(output_json, district_data_map[prefix])
 
-              console.log(`✅ ${prefix} → ${w.count} students`);
-            }
+              print("====================================")
+              print(f"✅ Saved: {name}-{prefix}")
+              print(f"📚 Roll Codes: {district_stats[prefix]['roll_codes']}")
+              print(f"🎓 Students: {district_stats[prefix]['students']}")
+              print(f"📄 File: {output_json}")
 
-            console.log("🎉 DONE");
-            console.log(`🎓 Total processed: ${total}`);
-          });
-
+          print("====================================")
+          print("🎉 ALL DISTRICT EXTRACTION COMPLETED")
           EOF
 
-      - name: Commit & Push
+      - name: Validate Extracted District Files
+        run: |
+          python << 'EOF'
+          import os
+          import json
+
+          BASE_DIR = "BSEB 10TH RESULT/Bseb 10th Result 2026"
+
+          DISTRICTS = [
+              ("11", "purnea"),
+              ("12", "araria"),
+              ("13", "kishanganj"),
+              ("14", "katihar"),
+              ("92", "siwan"),
+          ]
+
+          print("===== VALIDATION START =====")
+
+          for prefix, name in DISTRICTS:
+              file = os.path.join(
+                  BASE_DIR,
+                  f"{name}-{prefix}-bseb-10th-full-result-2026.json"
+              )
+
+              if not os.path.exists(file):
+                  print(f"❌ Missing file: {file}")
+                  continue
+
+              with open(file, "r", encoding="utf-8") as f:
+                  data = json.load(f)
+
+              total = 0
+              for rc in data:
+                  total += len(data[rc] or {})
+
+              roll_codes = sorted(data.keys(), key=lambda x: int(x))
+
+              print("====================================")
+              print(f"✅ {name}-{prefix}")
+              print("📚 Roll Codes:", len(data))
+              print("🎓 Students:", total)
+              print("🔹 First Roll Code:", roll_codes[0] if roll_codes else "none")
+              print("🔹 Last Roll Code:", roll_codes[-1] if roll_codes else "none")
+
+          print("====================================")
+          print("🎉 VALIDATION COMPLETE")
+          EOF
+
+      - name: Show Final Files
+        if: always()
+        run: |
+          echo "===== FINAL 10TH FOLDER ====="
+          ls -lah "BSEB 10TH RESULT/Bseb 10th Result 2026" || true
+
+          echo "===== ALL DISTRICT FILE SIZES ====="
+          find "BSEB 10TH RESULT/Bseb 10th Result 2026" -maxdepth 1 -name "*.json" -exec du -h {} \;
+
+      - name: Commit District Files
+        if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add "BSEB 10TH RESULT/Bseb 10th Result 2026"
+          find "BSEB 10TH RESULT/Bseb 10th Result 2026" -maxdepth 1 -name "*.json" -print0 | xargs -0 git add
+          git add ".github/workflows/extract-10th-district.yml"
 
-          git commit -m "10th district-wise extraction (robust stream)" || echo "No changes"
-
+          git status
+          git commit -m "Extract 10th district data batch 1" || echo "No changes to commit"
           git pull --rebase origin main || true
           git push
