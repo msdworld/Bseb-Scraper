@@ -1,4 +1,4 @@
-name: BSEB 10th District Wise Extraction (Stream)
+name: BSEB 10th District Wise Extraction (Robust Stream)
 
 on:
   workflow_dispatch:
@@ -20,15 +20,14 @@ jobs:
         with:
           node-version: 20
 
-      - name: Run Stream Extraction
+      - name: Run Robust Extraction
         run: |
           node << 'EOF'
           const fs = require("fs");
           const path = require("path");
           const zlib = require("zlib");
-          const readline = require("readline");
 
-          console.log("🚀 STREAM EXTRACTION STARTED");
+          console.log("🚀 ROBUST EXTRACTION STARTED");
 
           const INPUT_FILE = "bseb-10th-full-result-2026.json.gz";
 
@@ -91,51 +90,58 @@ jobs:
           const gunzip = zlib.createGunzip();
           const stream = fs.createReadStream(INPUT_FILE).pipe(gunzip);
 
-          const rl = readline.createInterface({
-            input: stream,
-            crlfDelay: Infinity
-          });
+          let buffer = "";
+          let currentKey = null;
+          let braceCount = 0;
 
           let total = 0;
 
-          rl.on("line", (line) => {
-            line = line.trim();
+          stream.on("data", chunk => {
+            buffer += chunk.toString();
 
-            if (!line || line === "{" || line === "}") return;
+            while (true) {
+              if (!currentKey) {
+                const keyMatch = buffer.match(/"(\d+)"\s*:\s*\{/);
+                if (!keyMatch) break;
 
-            // remove comma at end
-            if (line.endsWith(",")) {
-              line = line.slice(0, -1);
-            }
+                currentKey = keyMatch[1];
 
-            const match = line.match(/^"(\d+)":\s*(\{.*\})$/);
+                const startIndex = buffer.indexOf(keyMatch[0]);
+                buffer = buffer.slice(startIndex + keyMatch[0].length - 1);
 
-            if (!match) return;
+                braceCount = 1;
+              }
 
-            const key = match[1];
+              let i = 0;
+              for (; i < buffer.length; i++) {
+                if (buffer[i] === "{") braceCount++;
+                else if (buffer[i] === "}") braceCount--;
 
-            let student;
-            try {
-              student = JSON.parse(match[2]);
-            } catch {
-              return;
-            }
+                if (braceCount === 0) {
+                  const objStr = buffer.slice(0, i + 1);
 
-            const rollCode = String(student.rollCode || "");
-            if (rollCode.length < 2) return;
+                  try {
+                    const student = JSON.parse(objStr);
 
-            const prefix = rollCode.substring(0, 2);
+                    const rollCode = String(student.rollCode || "");
+                    if (rollCode.length >= 2) {
+                      const prefix = rollCode.substring(0, 2);
+                      writeStudent(prefix, currentKey, student);
+                      total++;
+                    }
+                  } catch {}
 
-            writeStudent(prefix, key, student);
+                  buffer = buffer.slice(i + 1);
+                  currentKey = null;
+                  break;
+                }
+              }
 
-            total++;
-
-            if (total % 50000 === 0) {
-              console.log(`📊 Processed: ${total}`);
+              if (braceCount !== 0) break;
             }
           });
 
-          rl.on("close", () => {
+          stream.on("end", () => {
             for (const prefix of Object.keys(writers)) {
               const w = writers[prefix];
               w.stream.write("\n}\n");
@@ -157,7 +163,7 @@ jobs:
 
           git add "BSEB 10TH RESULT/Bseb 10th Result 2026"
 
-          git commit -m "10th district-wise extraction (stream)" || echo "No changes"
+          git commit -m "10th district-wise extraction (robust stream)" || echo "No changes"
 
           git pull --rebase origin main || true
           git push
