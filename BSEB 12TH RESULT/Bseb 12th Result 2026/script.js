@@ -17,8 +17,8 @@ const BASE_DIR = __dirname;
 // ===============================
 // EDIT ONLY THESE 2 EVERY RUN
 // ===============================
-const DISTRICT_PREFIX = "23";
-const OUTPUT_FILE_NAME = "nawadah-23-bseb-12th-full-result-2026.json";
+const DISTRICT_PREFIX = "11";
+const OUTPUT_FILE_NAME = "patna-11-bseb-12th-full-result-2026.json";
 
 // ===============================
 // FILE PATHS
@@ -30,9 +30,9 @@ const OUTPUT_FILE = path.join(BASE_DIR, OUTPUT_FILE_NAME);
 // ROLL RANGE
 // ===============================
 const RANGES = [
-  [26030001, 26030999],
-  [26040001, 26040999],
-  [26050001, 26050999]
+  
+  [26050001, 26050999],
+  [26060001, 26060999]
 
   
 ];
