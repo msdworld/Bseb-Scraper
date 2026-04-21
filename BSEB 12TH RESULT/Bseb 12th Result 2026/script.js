@@ -17,8 +17,8 @@ const BASE_DIR = __dirname;
 // ===============================
 // EDIT ONLY THESE 2 EVERY RUN
 // ===============================
-const DISTRICT_PREFIX = "93";
-const OUTPUT_FILE_NAME = "kishanganj-93-bseb-12th-full-result-2026.json";
+const DISTRICT_PREFIX = "63";
+const OUTPUT_FILE_NAME = "madhepura-63-bseb-12th-full-result-2026.json";
 
 // ===============================
 // FILE PATHS
