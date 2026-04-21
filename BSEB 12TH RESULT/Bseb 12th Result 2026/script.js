@@ -30,7 +30,7 @@ const OUTPUT_FILE = path.join(BASE_DIR, OUTPUT_FILE_NAME);
 // ROLL RANGE
 // ===============================
 const RANGES = [
-  [26030001, 26030999]
+  [26030001, 26030999],
   [26040001, 26040999]
   
   
