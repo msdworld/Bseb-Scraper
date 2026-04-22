@@ -54,7 +54,8 @@ jobs:
           # =========================================
           DISTRICTS = [
             
-            ("55", "east-champaran"),
+            ("74", "rohtas"),
+            ("75", "buxar"),
           ]
 
           def save_custom_json(file_path, data):
