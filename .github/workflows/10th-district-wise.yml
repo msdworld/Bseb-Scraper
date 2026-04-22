@@ -55,9 +55,7 @@ jobs:
           DISTRICTS = [
             ("56", "sheohar"),
             ("61", "darbhanga"),
-            ("62", "madhubani"),
-            ("63", "samastipur"),
-            ("71", "patna"),
+            
           ]
 
           def save_custom_json(file_path, data):
@@ -162,9 +160,7 @@ jobs:
             
             ("56", "sheohar"),
             ("61", "darbhanga"),
-            ("62", "madhubani"),
-            ("63", "samastipur"),
-            ("71", "patna"),
+            
           ]
 
           print("===== VALIDATION START =====")
