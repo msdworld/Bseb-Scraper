@@ -17,8 +17,8 @@ const BASE_DIR = __dirname;
 // ===============================
 // EDIT ONLY THESE 2 EVERY RUN
 // ===============================
-const DISTRICT_PREFIX = "35";
-const OUTPUT_FILE_NAME = "westchamparan-35-bseb-12th-full-result-2026.json";
+const DISTRICT_PREFIX = "81";
+const OUTPUT_FILE_NAME = "munger-81-bseb-12th-full-result-2026.json";
 
 // ===============================
 // FILE PATHS
@@ -41,7 +41,7 @@ const RANGES = [
 // ===============================
 // SPEED
 // ===============================
-const ROLLCODE_PARALLEL = 10;
+const ROLLCODE_PARALLEL = 1;
 const CONCURRENCY = 100;
 const BATCH_SIZE = 100;
 const REQUEST_TIMEOUT = 6000;
