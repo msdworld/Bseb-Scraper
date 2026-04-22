@@ -17,8 +17,8 @@ const BASE_DIR = __dirname;
 // ===============================
 // EDIT ONLY THESE 2 EVERY RUN
 // ===============================
-const DISTRICT_PREFIX = "81";
-const OUTPUT_FILE_NAME = "munger-81-bseb-12th-full-result-2026.json";
+const DISTRICT_PREFIX = "13";
+const OUTPUT_FILE_NAME = "arabhojpur-13-bseb-12th-full-result-2026.json";
 
 // ===============================
 // FILE PATHS
@@ -30,7 +30,7 @@ const OUTPUT_FILE = path.join(BASE_DIR, OUTPUT_FILE_NAME);
 // ROLL RANGE
 // ===============================
 const RANGES = [
-  [26010001, 26010999]
+  [26020001, 26020999]
   
   
   
@@ -41,7 +41,7 @@ const RANGES = [
 // ===============================
 // SPEED
 // ===============================
-const ROLLCODE_PARALLEL = 1;
+const ROLLCODE_PARALLEL = 10;
 const CONCURRENCY = 100;
 const BATCH_SIZE = 100;
 const REQUEST_TIMEOUT = 6000;
