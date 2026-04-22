@@ -53,8 +53,9 @@ jobs:
           # EDIT DISTRICTS HERE
           # =========================================
           DISTRICTS = [
-            ("56", "sheohar"),
-            ("61", "darbhanga"),
+            ("62", "madhubani"),
+            ("63", "samastipur"),
+            
             
           ]
 
@@ -157,9 +158,9 @@ jobs:
           BASE_DIR = "BSEB 10TH RESULT/Bseb 10th Result 2026"
 
           DISTRICTS = [
+            ("62", "madhubani"),
+            ("63", "samastipur"),
             
-            ("56", "sheohar"),
-            ("61", "darbhanga"),
             
           ]
 
