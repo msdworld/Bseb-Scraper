@@ -53,7 +53,7 @@ jobs:
           # EDIT DISTRICTS HERE
           # =========================================
           DISTRICTS = [
-            ("63", "samastipur"),
+            ("71", "patna"),
             
             
             
@@ -159,7 +159,7 @@ jobs:
           BASE_DIR = "BSEB 10TH RESULT/Bseb 10th Result 2026"
 
           DISTRICTS = [
-            ("63", "samastipur"),
+            ("71", "patna"),
             
             
             
