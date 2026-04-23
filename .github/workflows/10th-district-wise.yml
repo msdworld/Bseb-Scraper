@@ -54,7 +54,7 @@ jobs:
           # =========================================
           DISTRICTS = [
             ("62", "madhubani"),
-            ("63", "samastipur"),
+            
             
             
           ]
@@ -159,7 +159,7 @@ jobs:
 
           DISTRICTS = [
             ("62", "madhubani"),
-            ("63", "samastipur"),
+            
             
             
           ]
