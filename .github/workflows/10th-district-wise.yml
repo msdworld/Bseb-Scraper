@@ -53,14 +53,8 @@ jobs:
           # EDIT DISTRICTS HERE
           # =========================================
           DISTRICTS = [
-            ("76", "kaimur"),
-            ("81", "gaya"),
-            ("82", "nawadah"),
-            ("83", "aurangabad"),
-            ("84", "jehanabad"),
-            ("85", "arwal"),
-            ("91", "saran"),
-            ("93", "gopalganj"),
+            ("62", "madhubani"),
+            
             
             
             
@@ -165,14 +159,7 @@ jobs:
           BASE_DIR = "BSEB 10TH RESULT/Bseb 10th Result 2026"
 
           DISTRICTS = [
-            ("76", "kaimur"),
-            ("81", "gaya"),
-            ("82", "nawadah"),
-            ("83", "aurangabad"),
-            ("84", "jehanabad"),
-            ("85", "arwal"),
-            ("91", "saran"),
-            ("93", "gopalganj"),
+            ("62", "madhubani"),
             
             
             
