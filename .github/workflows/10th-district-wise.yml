@@ -41,7 +41,9 @@ jobs:
           # EDIT DISTRICTS HERE
           # =========================
           DISTRICTS = [
-              ("23", "lakhisarai"),
+              ("62", "madhubani"),
+              ("63", "samastipur"),
+              ("71", "patna"),
           ]
 
           os.makedirs(BASE_DIR, exist_ok=True)
