@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  scrape:
+  run:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -12,46 +12,28 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-          fetch-depth: 0   # 🔥 important for stable push
+      - uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: 18
 
-      - name: Install Dependencies
+      - name: Install deps
         run: npm install axios
 
-      - name: Show Files (Debug)
-        run: |
-          echo "===== ROOT ====="
-          ls -lah
-          echo "===== 10TH FOLDER ====="
-          ls -lah "BSEB 10TH RESULT/Bseb 10th Result 2026" || true
-
-      - name: Run Scraper
+      - name: Run scraper
         run: node "BSEB 10TH RESULT/Bseb 10th Result 2026/script.js"
 
-      # 🔥 IMPORTANT: ensure everything is staged
-      - name: Prepare Git
+      - name: Commit safely
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "bot@github.com"
 
-      - name: Add Files
-        run: |
-          git add "BSEB 10TH RESULT/Bseb 10th Result 2026/*.json"
           git add .
 
-      - name: Commit Changes
-        run: |
-          git commit -m "Update district data $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
+          git commit -m "Update district data" || echo "No changes"
 
-      # 🔥 NO REBASE → NO ERROR
-      - name: Push Changes
-        run: |
-          git push origin main
+          git pull --rebase --autostash origin main
+
+          git push
