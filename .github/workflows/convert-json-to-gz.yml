@@ -4,7 +4,7 @@
     import os
     import json
 
-    FILE_PATH = "BSEB 10TH RESULT/Bseb 10th Result 2026/siwan-92-bseb-10th-full-result-2026.json"
+    FILE_PATH = "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
 
     if not os.path.exists(FILE_PATH):
         print("❌ File not found")
