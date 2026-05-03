@@ -1,4 +1,4 @@
-name: Scrape 10th District Data
+name: Bseb 10th Scrape District
 
 on:
   workflow_dispatch:
