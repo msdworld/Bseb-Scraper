@@ -1,4 +1,4 @@
-name: 10th District Scraper
+name: Scrape 10th District Data
 
 on:
   workflow_dispatch:
@@ -8,30 +8,67 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    permissions:
+      contents: write   # 🔥 REQUIRED for push
 
-      - name: Setup Node
+    steps:
+      # =========================
+      # CHECKOUT
+      # =========================
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # important for rebase
+
+      # =========================
+      # NODE SETUP
+      # =========================
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Install deps
+      # =========================
+      # INSTALL DEPENDENCIES
+      # =========================
+      - name: Install Dependencies
         run: npm install axios
 
-      - name: Run Script
-        run: node "BSEB 10TH RESULT/Bseb 10th Result 2026/script.js"
-
-      - name: Commit & Push (SAFE)
+      # =========================
+      # SHOW FILE STRUCTURE (DEBUG)
+      # =========================
+      - name: Show Project Structure
         run: |
-          git config --global user.name "bot"
-          git config --global user.email "bot@users.noreply.github.com"
+          echo "===== ROOT ====="
+          ls -lah
+          echo "===== 10TH FOLDER ====="
+          ls -lah "BSEB 10TH RESULT/Bseb 10th Result 2026"
 
-          git add .
-          git stash || true
+      # =========================
+      # RUN SCRAPER
+      # =========================
+      - name: Run Scraper
+        run: |
+          node "BSEB 10TH RESULT/Bseb 10th Result 2026/script.js"
+
+      # =========================
+      # COMMIT & PUSH (FINAL FIXED)
+      # =========================
+      - name: Commit & Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          echo "===== PULL LATEST ====="
           git pull --rebase origin main || true
-          git stash pop || true
 
-          git commit -m "Update district data" || echo "No changes"
+          echo "===== ADD FILES ====="
+          git add "BSEB 10TH RESULT/Bseb 10th Result 2026/*.json"
+
+          git status
+
+          echo "===== COMMIT ====="
+          git commit -m "Update district result data" || echo "No changes to commit"
+
+          echo "===== PUSH ====="
           git push
