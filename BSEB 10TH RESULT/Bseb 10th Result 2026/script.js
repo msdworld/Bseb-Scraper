@@ -15,7 +15,7 @@ const SCHOOL_LIST_FILE = path.join(process.cwd(), "bseb-10th-school-list-2026.js
 
 // Roll range
 const ROLLNO_START = 2600001;
-const ROLLNO_END = 2600002;
+const ROLLNO_END = 2600003;
 
 // SPEED
 const CONCURRENCY = 200;
@@ -180,7 +180,7 @@ function saveFile() {
             const rn = chunk[idx];
             outputData[rollCode][rn] = res;
             totalSaved++;
-            console.log(`💾 Saved ${rollCode}-${rn}`);
+            console.log(`✅💾 Saved ${rollCode}-${rn}`);
           }
         });
       }
