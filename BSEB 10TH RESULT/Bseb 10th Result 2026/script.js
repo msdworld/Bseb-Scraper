@@ -11,7 +11,7 @@ const OUTPUT_FILE_NAME = "siwan-92-bseb-10th-full-result-2026.json";
 // =============================
 const BASE_DIR = __dirname;
 const OUTPUT_PATH = path.join(BASE_DIR, OUTPUT_FILE_NAME);
-const SCHOOL_LIST_FILE = path.join(__dirname, "../../../bseb-10th-school-list-2026.json");
+const SCHOOL_LIST_FILE = path.join(process.cwd(), "bseb-10th-school-list-2026.json");
 
 // Roll range
 const ROLLNO_START = 2600001;
