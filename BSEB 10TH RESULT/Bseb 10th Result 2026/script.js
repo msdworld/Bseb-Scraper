@@ -228,7 +228,7 @@ async function fetchStudent(rollCode, rollNo) {
               saved++;
               totalSaved++;
 
-              console.log(`Saved ${rollNo}`);
+              console.log(`✅ Saved ${rollNo}`);
             }
           });
         }
