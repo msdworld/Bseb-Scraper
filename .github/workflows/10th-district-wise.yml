@@ -26,19 +26,7 @@ jobs:
       - name: Install Python Dependency
         run: pip install ijson
 
-      - name: Show Initial Files
-        run: |
-          echo "===== ROOT ====="
-          ls -lah
-
-          echo "===== 10TH FOLDER ====="
-          ls -lah "BSEB 10TH RESULT/Bseb 10th Result 2026" || true
-
-          echo "===== MASTER FILE ====="
-          ls -lh bseb-10th-full-result-2026.json.gz || true
-          du -h bseb-10th-full-result-2026.json.gz || true
-
-      - name: Extract Multiple Districts
+      - name: Extract Multiple Districts (COMPACT MODE)
         run: |
           python << 'EOF'
           import os
@@ -49,49 +37,56 @@ jobs:
           MASTER_GZ = "bseb-10th-full-result-2026.json.gz"
           BASE_DIR = "BSEB 10TH RESULT/Bseb 10th Result 2026"
 
-          # =========================================
+          # =========================
           # EDIT DISTRICTS HERE
-          # =========================================
+          # =========================
           DISTRICTS = [
-            ("71", "patna"),
-            
-            
-            
-            
+              ("71", "patna"),
           ]
 
+          # =========================
+          # COMPACT STUDENT FORMAT
+          # =========================
+          def compact_student(student):
+              if "subjects" in student and isinstance(student["subjects"], list):
+                  # ensure subjects are compact (single line)
+                  student["subjects"] = [
+                      {k: v for k, v in sub.items()} for sub in student["subjects"]
+                  ]
+              return student
+
+          # =========================
+          # SAVE COMPACT JSON
+          # =========================
           def save_custom_json(file_path, data):
               roll_codes = sorted(data.keys(), key=lambda x: int(x))
 
               with open(file_path, "w", encoding="utf-8") as f:
-                  f.write("{\n")
+                  f.write("{")
 
                   for rc_index, roll_code in enumerate(roll_codes):
                       students = data.get(roll_code, {})
                       roll_nos = sorted(students.keys(), key=lambda x: int(x))
 
-                      f.write(f'  "{roll_code}": {{\n')
+                      f.write(f'"{roll_code}":{{')
 
                       for rn_index, roll_no in enumerate(roll_nos):
-                          student = students[roll_no]
-                          student_json = json.dumps(student, ensure_ascii=False, indent=6)
-                          lines = student_json.splitlines()
+                          student = compact_student(students[roll_no])
 
-                          for line_index, line in enumerate(lines):
-                              if line_index == 0:
-                                  f.write(f'    "{roll_no}": {line}\n')
-                              else:
-                                  f.write(f'    {line}\n')
+                          # 🔥 FULL COMPACT (NO INDENT)
+                          student_json = json.dumps(student, ensure_ascii=False, separators=(",", ":"))
+
+                          f.write(f'"{roll_no}":{student_json}')
 
                           if rn_index < len(roll_nos) - 1:
-                              f.write(",\n")
+                              f.write(",")
 
-                      f.write("\n  }")
+                      f.write("}")
+
                       if rc_index < len(roll_codes) - 1:
                           f.write(",")
-                      f.write("\n")
 
-                  f.write("}\n")
+                  f.write("}")
 
           if not os.path.exists(MASTER_GZ):
               print(f"❌ Master GZ file not found: {MASTER_GZ}")
@@ -100,7 +95,6 @@ jobs:
           os.makedirs(BASE_DIR, exist_ok=True)
 
           print("📂 Streaming master file once...")
-          print("📦 Districts to extract:", len(DISTRICTS))
 
           district_data_map = {}
           district_stats = {}
@@ -127,10 +121,10 @@ jobs:
                           break
 
                   processed += 1
-                  if processed % 100 == 0:
-                      print(f"📚 Master Roll Codes Processed: {processed}")
+                  if processed % 200 == 0:
+                      print(f"📚 Processed: {processed}")
 
-          print("💾 Saving district files...")
+          print("💾 Saving compact district files...")
 
           for prefix, name in DISTRICTS:
               output_json = os.path.join(
@@ -144,78 +138,21 @@ jobs:
               print(f"✅ Saved: {name}-{prefix}")
               print(f"📚 Roll Codes: {district_stats[prefix]['roll_codes']}")
               print(f"🎓 Students: {district_stats[prefix]['students']}")
-              print(f"📄 File: {output_json}")
 
-          print("====================================")
-          print("🎉 ALL DISTRICT EXTRACTION COMPLETED")
+          print("🎉 DONE (COMPACT MODE)")
           EOF
 
-      - name: Validate Extracted District Files
-        run: |
-          python << 'EOF'
-          import os
-          import json
-
-          BASE_DIR = "BSEB 10TH RESULT/Bseb 10th Result 2026"
-
-          DISTRICTS = [
-            ("71", "patna"),
-            
-            
-            
-          ]
-
-          print("===== VALIDATION START =====")
-
-          for prefix, name in DISTRICTS:
-              file = os.path.join(
-                  BASE_DIR,
-                  f"{name}-{prefix}-bseb-10th-full-result-2026.json"
-              )
-
-              if not os.path.exists(file):
-                  print(f"❌ Missing file: {file}")
-                  continue
-
-              with open(file, "r", encoding="utf-8") as f:
-                  data = json.load(f)
-
-              total = 0
-              for rc in data:
-                  total += len(data[rc] or {})
-
-              roll_codes = sorted(data.keys(), key=lambda x: int(x))
-
-              print("====================================")
-              print(f"✅ {name}-{prefix}")
-              print("📚 Roll Codes:", len(data))
-              print("🎓 Students:", total)
-              print("🔹 First Roll Code:", roll_codes[0] if roll_codes else "none")
-              print("🔹 Last Roll Code:", roll_codes[-1] if roll_codes else "none")
-
-          print("====================================")
-          print("🎉 VALIDATION COMPLETE")
-          EOF
-
-      - name: Show Final Files
-        if: always()
-        run: |
-          echo "===== FINAL 10TH FOLDER ====="
-          ls -lah "BSEB 10TH RESULT/Bseb 10th Result 2026" || true
-
-          echo "===== ALL DISTRICT FILE SIZES ====="
-          find "BSEB 10TH RESULT/Bseb 10th Result 2026" -maxdepth 1 -name "*.json" -exec du -h {} \;
-
-      - name: Commit District Files
+      - name: Commit District Files (SAFE PUSH)
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          find "BSEB 10TH RESULT/Bseb 10th Result 2026" -maxdepth 1 -name "*.json" -print0 | xargs -0 git add
-          git add ".github/workflows/10th-district-wise.yml"
+          find "BSEB 10TH RESULT/Bseb 10th Result 2026" -name "*.json" -print0 | xargs -0 git add
 
-          git status
-          git commit -m "Extract 10th district data batch 1" || echo "No changes to commit"
-          git pull --rebase origin main || true
+          git commit -m "Extract 10th district compact data" || echo "No changes"
+
+          # 🔥 IMPORTANT: NO REBASE (avoids your previous conflict issue)
+          git pull origin main --no-rebase || true
+
           git push
