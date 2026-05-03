@@ -9,11 +9,9 @@ const DISTRICT_PREFIX = "92";
 const OUTPUT_FILE_NAME = "siwan-92-bseb-10th-full-result-2026.json";
 
 // =============================
-const API_URL = "https://resultapi.biharboardonline.org/result";
-
 const BASE_DIR = __dirname;
 const OUTPUT_PATH = path.join(BASE_DIR, OUTPUT_FILE_NAME);
-const SCHOOL_LIST_FILE = path.join(process.cwd(), "bseb-10th-school-list-2026.json");
+const SCHOOL_LIST_FILE = path.join(__dirname, "../../../bseb-10th-school-list-2026.json");
 
 // Roll range
 const ROLLNO_START = 2600001;
@@ -21,14 +19,13 @@ const ROLLNO_END = 2600002;
 
 // SPEED
 const CONCURRENCY = 200;
-const BATCH_SIZE = 100;
-const REQUEST_TIMEOUT = 5000;
+const BATCH_SIZE = 999;
 
 // =============================
 // AXIOS
 // =============================
 const client = axios.create({
-  timeout: REQUEST_TIMEOUT,
+  timeout: 6000,
   headers: {
     "User-Agent": "Mozilla/5.0",
     "Referer": "https://result.biharboardonline.org/",
@@ -44,76 +41,41 @@ function clean(txt) {
 }
 
 function normalizeMarks(val) {
-  if (val === null || val === undefined) return "";
-  const str = String(val).trim();
-  if (!str || str === "NaN") return "";
-  return String(Number(str));
+  if (!val) return "";
+  return String(Number(val));
 }
 
 // =============================
 // SUBJECT FORMAT (ONE LINE)
 // =============================
-function buildPractical(subject) {
-  const projectWork = normalizeMarks(subject.project_work);
-  const literacyActivity = normalizeMarks(subject.literacy_activity);
-  const iaSci = normalizeMarks(subject.ia_sci);
-  const practical = normalizeMarks(subject.practical);
+function buildPractical(sub) {
+  const p = normalizeMarks(sub.practical);
+  const pw = normalizeMarks(sub.project_work);
+  const la = normalizeMarks(sub.literacy_activity);
+  const ia = normalizeMarks(sub.ia_sci);
 
-  if (subject.sub_code === "111") {
-    const parts = [];
-    if (projectWork) parts.push(projectWork);
-    if (literacyActivity) parts.push(literacyActivity);
-    return parts.join("+");
-  }
+  if (sub.sub_code === "111") return [pw, la].filter(Boolean).join("+");
+  if (sub.sub_code === "112") return ia || "";
 
-  if (subject.sub_code === "112") {
-    if (iaSci) return iaSci;
-  }
-
-  if (practical) return practical;
-
-  const parts = [];
-  if (projectWork) parts.push(projectWork);
-  if (literacyActivity) parts.push(literacyActivity);
-  if (iaSci) parts.push(iaSci);
-
-  return parts.join("+");
+  return p || [pw, la, ia].filter(Boolean).join("+");
 }
 
 function formatSubjects(subjects = []) {
   return subjects.map(sub => {
     const obj = {
-      subCode: clean(sub.sub_code || ""),
-      subject: clean(sub.sub_name || ""),
-      theory: normalizeMarks(sub.theory || ""),
-      subGroupId: clean(sub.sub_group_id || ""),
-      subTotal: normalizeMarks(sub.sub_total || "")
+      subCode: clean(sub.sub_code),
+      subject: clean(sub.sub_name),
+      theory: normalizeMarks(sub.theory),
+      subGroupId: clean(sub.sub_group_id),
+      subTotal: normalizeMarks(sub.sub_total)
     };
 
     const practical = buildPractical(sub);
     if (practical) obj.practical = practical;
 
-    if (sub.sub_result !== null && sub.sub_result !== undefined && clean(sub.sub_result) !== "") {
-      obj.subResult = clean(sub.sub_result);
-    }
+    if (sub.sub_result) obj.subResult = clean(sub.sub_result);
 
-    if (sub.regulation !== null && sub.regulation !== undefined && clean(sub.regulation) !== "") {
-      obj.regulation = clean(sub.regulation);
-    }
-
-    if (sub.cce !== null && sub.cce !== undefined && clean(sub.cce) !== "") {
-      obj.cce = clean(sub.cce);
-    }
-
-    if (sub.is_compartmental !== null && sub.is_compartmental !== undefined && clean(sub.is_compartmental) !== "") {
-      obj.isCompartmental = clean(sub.is_compartmental);
-    }
-
-    if (sub.is_improved_sub !== null && sub.is_improved_sub !== undefined && clean(sub.is_improved_sub) !== "") {
-      obj.isImprovedSub = clean(sub.is_improved_sub);
-    }
-
-    return obj; // ✅ one-line object
+    return obj;
   });
 }
 
@@ -122,44 +84,30 @@ function formatSubjects(subjects = []) {
 // =============================
 function formatStudent(data) {
   const student = {
-    studentName: clean(data.name || ""),
-    fatherName: clean(data.father_name || ""),
-    regNumber: clean(data.reg_no || ""),
-    BSEBUniqueId: clean(data.bseb_id || ""),
-    schoolName: clean(data.school_name || ""),
-    rollCode: clean(data.roll_code || ""),
-    rollNo: clean(data.roll_no || ""),
-    examType: clean(data.exam_type || ""),
-    totalMarks: normalizeMarks(data.total || ""),
-    division: clean(data.division || ""),
-    subjects: formatSubjects(data.subjects || [])
+    studentName: clean(data.name),
+    fatherName: clean(data.father_name),
+    regNumber: clean(data.reg_no),
+    BSEBUniqueId: clean(data.bseb_id),
+    schoolName: clean(data.school_name),
+    rollCode: clean(data.roll_code),
+    rollNo: clean(data.roll_no),
+    examType: clean(data.exam_type),
+    totalMarks: normalizeMarks(data.total),
+    division: clean(data.division)
   };
 
+  // ✅ CORRECT POSITION
   if (data.passed_under_regulation) {
     student.passedUnderRegulation = clean(data.passed_under_regulation);
   }
 
-  if (data.is_topper === true) {
-    student.isTopper = true;
-  }
-
-  if (data.is_improved_result) {
-    student.isImprovedResult = clean(data.is_improved_result);
-  }
-
-  if (data.is_expelled) {
-    student.isExpelled = clean(data.is_expelled);
-  }
-
-  if (data.division_grace_marks) {
-    student.divisionGraceMarks = clean(data.division_grace_marks);
-  }
+  student.subjects = formatSubjects(data.subjects);
 
   return student;
 }
 
 // =============================
-// LOAD FILES
+// LOAD DATA
 // =============================
 let outputData = {};
 
@@ -177,28 +125,17 @@ const rollCodes = Object.keys(schoolList)
 // =============================
 // FETCH
 // =============================
-async function fetchStudentResult(rollCode, rollNo) {
+async function fetchStudent(rollCode, rollNo) {
   try {
-    const res = await client.get(API_URL, {
-      params: {
-        roll_code: rollCode,
-        roll_no: rollNo
-      }
+    const res = await client.get("https://resultapi.biharboardonline.org/result", {
+      params: { roll_code: rollCode, roll_no: rollNo }
     });
 
-    if (!res.data || !res.data.success || !res.data.data) {
-      return null;
-    }
+    if (!res.data?.success || !res.data?.data) return null;
 
     const student = formatStudent(res.data.data);
 
-    if (
-      student.studentName &&
-      student.rollCode === String(rollCode) &&
-      student.rollNo === String(rollNo)
-    ) {
-      return student;
-    }
+    if (student.studentName) return student;
 
     return null;
   } catch {
@@ -207,47 +144,50 @@ async function fetchStudentResult(rollCode, rollNo) {
 }
 
 // =============================
+// SAVE
+// =============================
+function saveFile() {
+  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(outputData, null, 2));
+}
+
+// =============================
 // MAIN
 // =============================
 (async () => {
   let totalSaved = 0;
 
-  for (const rc of rollCodes) {
-    if (!outputData[rc]) outputData[rc] = {};
+  for (const rollCode of rollCodes) {
+    if (!outputData[rollCode]) outputData[rollCode] = {};
 
-    console.log(`🚀 Started ${rc} from ${ROLLNO_START}`);
+    console.log(`🚀 Started ${rollCode} from ${ROLLNO_START}`);
 
     for (let start = ROLLNO_START; start <= ROLLNO_END; start += BATCH_SIZE) {
-      const end = Math.min(start + BATCH_SIZE - 1, ROLLNO_END);
-
       const batch = [];
-      for (let rn = start; rn <= end; rn++) {
-        batch.push(rn);
+
+      for (let i = start; i < start + BATCH_SIZE && i <= ROLLNO_END; i++) {
+        if (!outputData[rollCode][i]) batch.push(i);
       }
 
       for (let i = 0; i < batch.length; i += CONCURRENCY) {
         const chunk = batch.slice(i, i + CONCURRENCY);
 
         const results = await Promise.all(
-          chunk.map(rn => fetchStudentResult(rc, rn))
+          chunk.map(rn => fetchStudent(rollCode, rn))
         );
 
-        for (let j = 0; j < chunk.length; j++) {
-          const rn = chunk[j];
-          const result = results[j];
-
-          if (result && !outputData[rc][rn]) {
-            outputData[rc][rn] = result;
+        results.forEach((res, idx) => {
+          if (res) {
+            const rn = chunk[idx];
+            outputData[rollCode][rn] = res;
             totalSaved++;
-
-            console.log(`✅ Saved ${rn}`);
+            console.log(`💾 Saved ${rollCode}-${rn}`);
           }
-        }
+        });
       }
+
+      saveFile();
     }
   }
-
-  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(outputData, null, 2));
 
   console.log("================================");
   console.log(`🎓 This run saved total: ${totalSaved}`);
