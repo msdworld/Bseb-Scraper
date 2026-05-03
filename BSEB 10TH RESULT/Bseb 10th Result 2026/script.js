@@ -5,8 +5,8 @@ const path = require("path");
 // =============================
 // CONFIG (CHANGE EVERY RUN)
 // =============================
-const DISTRICT_PREFIX = "92";
-const OUTPUT_FILE_NAME = "siwan-92-bseb-10th-full-result-2026.json";
+const DISTRICT_PREFIX = "24";
+const OUTPUT_FILE_NAME = "sheikhpura-24-bseb-10th-full-result-2026.json";
 
 // =============================
 const BASE_DIR = __dirname;
