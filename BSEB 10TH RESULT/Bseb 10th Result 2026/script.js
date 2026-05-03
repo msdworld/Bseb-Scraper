@@ -20,7 +20,7 @@ const SCHOOL_LIST_FILE = path.join(
 
 // Roll range
 const ROLLNO_START = 2600001;
-const ROLLNO_END = 2600001;
+const ROLLNO_END = 2600999;
 
 // SPEED
 const ROLLCODE_PARALLEL = 20;
