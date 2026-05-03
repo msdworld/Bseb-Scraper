@@ -14,24 +14,15 @@ const OUTPUT_PATH = path.join(BASE_DIR, OUTPUT_FILE_NAME);
 const SCHOOL_LIST_FILE = path.join(process.cwd(), "bseb-10th-school-list-2026.json");
 
 // Roll range
-const ROLLNO_START = 2600001;
-const ROLLNO_END = 2600003;
+const START_ROLL = 2600001;
+const END_ROLL = 2600003;
 
 // SPEED
 const CONCURRENCY = 200;
 const BATCH_SIZE = 999;
 
 // =============================
-// AXIOS
-// =============================
-const client = axios.create({
-  timeout: 6000,
-  headers: {
-    "User-Agent": "Mozilla/5.0",
-    "Referer": "https://result.biharboardonline.org/",
-    "Origin": "https://result.biharboardonline.org"
-  }
-});
+const API_URL = "https://resultapi.biharboardonline.org/result";
 
 // =============================
 // HELPERS
@@ -41,39 +32,60 @@ function clean(txt) {
 }
 
 function normalizeMarks(val) {
-  if (!val) return "";
-  return String(Number(val));
+  if (val === null || val === undefined) return "";
+  const str = String(val).trim();
+  if (!str) return "";
+  return String(Number(str));
 }
 
 // =============================
-// SUBJECT FORMAT (ONE LINE)
+// SUBJECT LOGIC (UNCHANGED)
 // =============================
-function buildPractical(sub) {
-  const p = normalizeMarks(sub.practical);
-  const pw = normalizeMarks(sub.project_work);
-  const la = normalizeMarks(sub.literacy_activity);
-  const ia = normalizeMarks(sub.ia_sci);
+function buildPractical(subject) {
+  const projectWork = normalizeMarks(subject.project_work);
+  const literacyActivity = normalizeMarks(subject.literacy_activity);
+  const iaSci = normalizeMarks(subject.ia_sci);
+  const practical = normalizeMarks(subject.practical);
 
-  if (sub.sub_code === "111") return [pw, la].filter(Boolean).join("+");
-  if (sub.sub_code === "112") return ia || "";
+  if (subject.sub_code === "111") {
+    const parts = [];
+    if (projectWork) parts.push(projectWork);
+    if (literacyActivity) parts.push(literacyActivity);
+    return parts.join("+");
+  }
 
-  return p || [pw, la, ia].filter(Boolean).join("+");
+  if (subject.sub_code === "112") {
+    if (iaSci) return iaSci;
+  }
+
+  if (practical) return practical;
+
+  const parts = [];
+  if (projectWork) parts.push(projectWork);
+  if (literacyActivity) parts.push(literacyActivity);
+  if (iaSci) parts.push(iaSci);
+
+  return parts.join("+");
 }
 
 function formatSubjects(subjects = []) {
   return subjects.map(sub => {
     const obj = {
-      subCode: clean(sub.sub_code),
-      subject: clean(sub.sub_name),
-      theory: normalizeMarks(sub.theory),
-      subGroupId: clean(sub.sub_group_id),
-      subTotal: normalizeMarks(sub.sub_total)
+      subCode: clean(sub.sub_code || ""),
+      subject: clean(sub.sub_name || ""),
+      theory: normalizeMarks(sub.theory || ""),
+      subGroupId: clean(sub.sub_group_id || ""),
+      subTotal: normalizeMarks(sub.sub_total || "")
     };
 
     const practical = buildPractical(sub);
     if (practical) obj.practical = practical;
 
-    if (sub.sub_result) obj.subResult = clean(sub.sub_result);
+    if (clean(sub.sub_result)) obj.subResult = clean(sub.sub_result);
+    if (clean(sub.regulation)) obj.regulation = clean(sub.regulation);
+    if (clean(sub.cce)) obj.cce = clean(sub.cce);
+    if (clean(sub.is_compartmental)) obj.isCompartmental = clean(sub.is_compartmental);
+    if (clean(sub.is_improved_sub)) obj.isImprovedSub = clean(sub.is_improved_sub);
 
     return obj;
   });
@@ -96,97 +108,133 @@ function formatStudent(data) {
     division: clean(data.division)
   };
 
-  // ✅ CORRECT POSITION
-  if (data.passed_under_regulation) {
+  if (clean(data.passed_under_regulation)) {
     student.passedUnderRegulation = clean(data.passed_under_regulation);
   }
 
-  student.subjects = formatSubjects(data.subjects);
+  student.subjects = formatSubjects(data.subjects || []);
 
   return student;
 }
 
 // =============================
-// LOAD DATA
+// 🔥 CUSTOM SAVE (SUBJECT ONE LINE)
 // =============================
-let outputData = {};
+function saveCustomJSON(file, data) {
+  const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
 
-if (fs.existsSync(OUTPUT_PATH)) {
-  console.log("📂 Loading existing data...");
-  outputData = JSON.parse(fs.readFileSync(OUTPUT_PATH, "utf8"));
+  let out = "{\n";
+
+  rollCodes.forEach((rc, rc_i) => {
+    out += `  "${rc}": {\n`;
+
+    const students = data[rc];
+    const rollNos = Object.keys(students).sort((a, b) => Number(a) - Number(b));
+
+    rollNos.forEach((rn, rn_i) => {
+      const student = { ...students[rn] };
+
+      const subjects = student.subjects || [];
+      delete student.subjects;
+
+      const studentLines = JSON.stringify(student, null, 6).split("\n");
+
+      studentLines.pop(); // remove closing }
+
+      out += `    "${rn}": ${studentLines[0]}\n`;
+      for (let i = 1; i < studentLines.length; i++) {
+        out += `    ${studentLines[i]}\n`;
+      }
+
+      // 🔥 SUBJECT ONE LINE
+      const subjectsStr = JSON.stringify(subjects);
+      out += `      ,"subjects": ${subjectsStr}\n`;
+      out += `    }`;
+
+      if (rn_i < rollNos.length - 1) out += ",";
+      out += "\n";
+    });
+
+    out += `  }`;
+    if (rc_i < rollCodes.length - 1) out += ",";
+    out += "\n";
+  });
+
+  out += "}\n";
+
+  fs.writeFileSync(file, out, "utf8");
 }
-
-const schoolList = JSON.parse(fs.readFileSync(SCHOOL_LIST_FILE, "utf8"));
-
-const rollCodes = Object.keys(schoolList)
-  .filter(rc => rc.startsWith(DISTRICT_PREFIX))
-  .sort((a, b) => Number(a) - Number(b));
 
 // =============================
 // FETCH
 // =============================
-async function fetchStudent(rollCode, rollNo) {
+async function fetchResult(rc, rn) {
   try {
-    const res = await client.get("https://resultapi.biharboardonline.org/result", {
-      params: { roll_code: rollCode, roll_no: rollNo }
+    const res = await axios.get(API_URL, {
+      params: { roll_code: rc, roll_no: rn },
+      timeout: 6000
     });
 
-    if (!res.data?.success || !res.data?.data) return null;
+    if (!res.data || !res.data.success) return null;
 
-    const student = formatStudent(res.data.data);
-
-    if (student.studentName) return student;
-
-    return null;
+    return formatStudent(res.data.data);
   } catch {
     return null;
   }
 }
 
 // =============================
-// SAVE
-// =============================
-function saveFile() {
-  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(outputData, null, 2));
-}
-
-// =============================
 // MAIN
 // =============================
 (async () => {
+  console.log("📂 Loading school list...");
+
+  const schoolList = JSON.parse(fs.readFileSync(SCHOOL_LIST_FILE, "utf8"));
+
+  const rollCodes = Object.keys(schoolList)
+    .filter(rc => rc.startsWith(DISTRICT_PREFIX))
+    .sort((a, b) => Number(a) - Number(b));
+
+  let output = {};
+
+  if (fs.existsSync(OUTPUT_PATH)) {
+    console.log("📂 Loading existing data...");
+    output = JSON.parse(fs.readFileSync(OUTPUT_PATH, "utf8"));
+  }
+
   let totalSaved = 0;
 
-  for (const rollCode of rollCodes) {
-    if (!outputData[rollCode]) outputData[rollCode] = {};
+  for (const rc of rollCodes) {
+    if (!output[rc]) output[rc] = {};
 
-    console.log(`🚀 Started ${rollCode} from ${ROLLNO_START}`);
+    console.log(`🚀 Started ${rc} from ${START_ROLL}`);
 
-    for (let start = ROLLNO_START; start <= ROLLNO_END; start += BATCH_SIZE) {
+    for (let rn = START_ROLL; rn <= END_ROLL; rn += BATCH_SIZE) {
       const batch = [];
 
-      for (let i = start; i < start + BATCH_SIZE && i <= ROLLNO_END; i++) {
-        if (!outputData[rollCode][i]) batch.push(i);
+      for (let i = rn; i < rn + BATCH_SIZE && i <= END_ROLL; i++) {
+        if (!output[rc][i]) batch.push(i);
       }
 
       for (let i = 0; i < batch.length; i += CONCURRENCY) {
         const chunk = batch.slice(i, i + CONCURRENCY);
 
         const results = await Promise.all(
-          chunk.map(rn => fetchStudent(rollCode, rn))
+          chunk.map(r => fetchResult(rc, r))
         );
 
         results.forEach((res, idx) => {
           if (res) {
-            const rn = chunk[idx];
-            outputData[rollCode][rn] = res;
+            const rollNo = chunk[idx];
+            output[rc][rollNo] = res;
             totalSaved++;
-            console.log(`✅💾 Saved ${rollCode}-${rn}`);
+            console.log(`✅ Saved ${rollNo}`);
           }
         });
       }
-
-      saveFile();
     }
+
+    saveCustomJSON(OUTPUT_PATH, output);
   }
 
   console.log("================================");
