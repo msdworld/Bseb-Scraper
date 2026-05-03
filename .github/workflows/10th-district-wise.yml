@@ -41,16 +41,16 @@ jobs:
           # EDIT DISTRICTS HERE
           # =========================
           DISTRICTS = [
-              ("12", "araria"),
-            ("85", "arwal"),
-            ("83", "aurangabad"),
-            ("32", "banka"),
-            ("26", "begusarai"),
-            ("31", "bhagalpur"),
-            ("73", "bhojpur"),
-            ("75", "buxar"),
-            ("61", "darbhanga"),
-            ("55", "east-champaran"),
+              ("81", "gaya"),
+            ("93", "gopalganj"),
+            ("22", "jamui"),
+            ("84", "jehanabad"),
+            ("76", "kaimur"),
+            ("14", "katihar"),
+            ("25", "khagaria"),
+            ("13", "kishanganj"),
+            ("43", "madhepura"),
+            ("21", "munger"),
           ]
 
           os.makedirs(BASE_DIR, exist_ok=True)
