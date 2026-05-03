@@ -14,7 +14,7 @@ const BASE_DIR = __dirname;
 const OUTPUT_PATH = path.join(BASE_DIR, OUTPUT_FILE_NAME);
 const SCHOOL_LIST_PATH = path.join(
   __dirname,
-  "../../../bseb-10th-school-list-2026.json"
+  "../../bseb-10th-school-list-2026.json"
 );
 
 // Roll range (10th)
