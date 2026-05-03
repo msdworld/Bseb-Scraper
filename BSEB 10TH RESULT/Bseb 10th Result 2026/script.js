@@ -3,27 +3,34 @@ const fs = require("fs");
 const path = require("path");
 
 // =============================
-// CONFIG (EDIT EVERY RUN)
+// CONFIG (CHANGE EVERY RUN)
 // =============================
 const DISTRICT_PREFIX = "92";
-const OUTPUT_FILE = "siwan-92-bseb-10th-full-result-2026.json";
+const OUTPUT_FILE_NAME = "siwan-92-bseb-10th-full-result-2026.json";
 
 // =============================
-const SCHOOL_LIST_FILE = path.resolve(process.cwd(), "bseb-10th-school-list-2026.json");
-const OUTPUT_PATH = path.join(__dirname, OUTPUT_FILE);
+const BASE_DIR = __dirname;
+const OUTPUT_PATH = path.join(BASE_DIR, OUTPUT_FILE_NAME);
 
-const START_ROLL = 2600001;
-const END_ROLL = 2600005;
+// ✅ FIXED PATH (ROOT LEVEL FILE)
+const SCHOOL_LIST_FILE = path.join(
+  process.cwd(),
+  "bseb-10th-school-list-2026.json"
+);
+
+// Roll range
+const ROLLNO_START = 2600001;
+const ROLLNO_END = 2600001;
 
 // SPEED
+const ROLLCODE_PARALLEL = 20;
 const CONCURRENCY = 120;
 const BATCH_SIZE = 100;
+const REQUEST_TIMEOUT = 6000;
 
 // =============================
-// AXIOS
-// =============================
 const client = axios.create({
-  timeout: 6000,
+  timeout: REQUEST_TIMEOUT,
   headers: {
     "User-Agent": "Mozilla/5.0",
     "Referer": "https://result.biharboardonline.org/",
@@ -34,37 +41,52 @@ const client = axios.create({
 // =============================
 // HELPERS
 // =============================
-const clean = v => String(v || "").trim();
-const num = v => (v ? String(Number(v)) : "");
-
-// =============================
-// SUBJECT FORMATTER (KEEP YOUR LOGIC)
-// =============================
-function buildPractical(s) {
-  const pw = num(s.project_work);
-  const la = num(s.literacy_activity);
-  const sci = num(s.ia_sci);
-  const pr = num(s.practical);
-
-  if (s.sub_code === "111") return [pw, la].filter(Boolean).join("+");
-  if (s.sub_code === "112") return sci || pr;
-
-  return pr || [pw, la, sci].filter(Boolean).join("+");
+function clean(txt) {
+  return String(txt || "").replace(/\s+/g, " ").trim();
 }
 
-function formatSubjects(arr = []) {
-  return arr.map(s => {
+function normalizeMarks(val) {
+  if (!val) return "";
+  return String(Number(val));
+}
+
+// =============================
+// SUBJECT FORMAT LOGIC (UNCHANGED)
+// =============================
+function buildPractical(sub) {
+  const pw = normalizeMarks(sub.project_work);
+  const la = normalizeMarks(sub.literacy_activity);
+  const ia = normalizeMarks(sub.ia_sci);
+  const pr = normalizeMarks(sub.practical);
+
+  if (sub.sub_code === "111") {
+    return [pw, la].filter(Boolean).join("+");
+  }
+
+  if (sub.sub_code === "112") {
+    return ia || pr;
+  }
+
+  return pr || [pw, la, ia].filter(Boolean).join("+");
+}
+
+function formatSubjects(subjects = []) {
+  return subjects.map(sub => {
     const obj = {
-      subCode: clean(s.sub_code),
-      subject: clean(s.sub_name),
-      theory: num(s.theory),
-      subGroupId: clean(s.sub_group_id),
-      subTotal: num(s.sub_total)
+      subCode: clean(sub.sub_code),
+      subject: clean(sub.sub_name),
+      theory: normalizeMarks(sub.theory),
+      subGroupId: clean(sub.sub_group_id),
+      subTotal: normalizeMarks(sub.sub_total)
     };
 
-    const p = buildPractical(s);
-    if (p) obj.practical = p;
-    if (s.sub_result) obj.subResult = clean(s.sub_result);
+    const practical = buildPractical(sub);
+    if (practical) obj.practical = practical;
+
+    if (clean(sub.sub_result)) obj.subResult = clean(sub.sub_result);
+
+    // ✅ regulation ONLY inside subject
+    if (clean(sub.regulation)) obj.regulation = clean(sub.regulation);
 
     return obj;
   });
@@ -73,76 +95,109 @@ function formatSubjects(arr = []) {
 // =============================
 // STUDENT FORMAT
 // =============================
-function formatStudent(d) {
-  return {
-    studentName: clean(d.name),
-    fatherName: clean(d.father_name),
-    regNumber: clean(d.reg_no),
-    BSEBUniqueId: clean(d.bseb_id),
-    schoolName: clean(d.school_name),
-    rollCode: clean(d.roll_code),
-    rollNo: clean(d.roll_no),
-    examType: clean(d.exam_type),
-    totalMarks: num(d.total),
-    division: clean(d.division),
-    passedUnderRegulation: clean(d.passed_under_regulation),
-    subjects: formatSubjects(d.subjects)
+function formatStudent(data) {
+  const student = {
+    studentName: clean(data.name),
+    fatherName: clean(data.father_name),
+    regNumber: clean(data.reg_no),
+    BSEBUniqueId: clean(data.bseb_id),
+    schoolName: clean(data.school_name),
+    rollCode: clean(data.roll_code),
+    rollNo: clean(data.roll_no),
+    examType: clean(data.exam_type),
+    totalMarks: normalizeMarks(data.total),
+    division: clean(data.division)
   };
+
+  // ✅ only if exists
+  if (clean(data.passed_under_regulation)) {
+    student.passedUnderRegulation = clean(data.passed_under_regulation);
+  }
+
+  if (clean(data.division_grace_marks)) {
+    student.divisionGraceMarks = clean(data.division_grace_marks);
+  }
+
+  student.subjects = formatSubjects(data.subjects);
+
+  return student;
 }
 
 // =============================
-// SAVE FORMAT (🔥 EXACT MATCH)
+// CUSTOM JSON FORMAT (FINAL FIX)
 // =============================
-function saveJSON(file, data) {
-  const rcList = Object.keys(data).sort((a, b) => a - b);
+function formatStudentJSON(student) {
+  const lines = [];
 
-  const out = [];
-  out.push("{");
+  lines.push("{");
+  lines.push(`      "studentName": ${JSON.stringify(student.studentName)},`);
+  lines.push(`      "fatherName": ${JSON.stringify(student.fatherName)},`);
+  lines.push(`      "regNumber": ${JSON.stringify(student.regNumber)},`);
+  lines.push(`      "BSEBUniqueId": ${JSON.stringify(student.BSEBUniqueId)},`);
+  lines.push(`      "schoolName": ${JSON.stringify(student.schoolName)},`);
+  lines.push(`      "rollCode": ${JSON.stringify(student.rollCode)},`);
+  lines.push(`      "rollNo": ${JSON.stringify(student.rollNo)},`);
+  lines.push(`      "examType": ${JSON.stringify(student.examType)},`);
+  lines.push(`      "totalMarks": ${JSON.stringify(student.totalMarks)},`);
+  lines.push(`      "division": ${JSON.stringify(student.division)},`);
 
-  rcList.forEach((rc, i) => {
-    out.push(`  "${rc}": {`);
+  if (student.passedUnderRegulation) {
+    lines.push(`      "passedUnderRegulation": ${JSON.stringify(student.passedUnderRegulation)},`);
+  }
 
-    const students = data[rc];
-    const rnList = Object.keys(students).sort((a, b) => a - b);
+  if (student.divisionGraceMarks) {
+    lines.push(`      "divisionGraceMarks": ${JSON.stringify(student.divisionGraceMarks)},`);
+  }
 
-    rnList.forEach((rn, j) => {
-      const st = students[rn];
+  // ✅ SUBJECTS MULTI LINE (FINAL FIX)
+  lines.push(`      "subjects": [`);
 
-      const subjects = st.subjects;
-      const subjectsStr = JSON.stringify(subjects);
-
-      const { subjects: _, ...rest } = st;
-      const base = JSON.stringify(rest, null, 6).split("\n");
-
-      base.forEach((line, idx) => {
-        if (idx === 0) {
-          out.push(`    "${rn}": ${line}`);
-        } else {
-          out.push(`    ${line}`);
-        }
-      });
-
-      // 👇 SUBJECTS ONE PER LINE
-      out.push(`      ,"subjects": [`);
-      subjects.forEach((sub, k) => {
-        const line = JSON.stringify(sub);
-        out.push(`        ${line}${k < subjects.length - 1 ? "," : ""}`);
-      });
-      out.push(`      ]`);
-
-      out.push(`    }${j < rnList.length - 1 ? "," : ""}`);
-    });
-
-    out.push(`  }${i < rcList.length - 1 ? "," : ""}`);
+  student.subjects.forEach((sub, i) => {
+    const comma = i < student.subjects.length - 1 ? "," : "";
+    lines.push(`        ${JSON.stringify(sub)}${comma}`);
   });
 
-  out.push("}");
+  lines.push(`      ]`);
+  lines.push("    }");
 
-  fs.writeFileSync(file, out.join("\n"));
+  return lines.join("\n");
 }
 
 // =============================
-// FETCH
+// SAVE JSON
+// =============================
+function saveJSON(file, data) {
+  const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
+
+  const lines = ["{"];
+
+  rollCodes.forEach((rc, i) => {
+    lines.push(`  "${rc}": {`);
+
+    const students = data[rc];
+    const rollNos = Object.keys(students).sort((a, b) => Number(a) - Number(b));
+
+    rollNos.forEach((rn, j) => {
+      const studentStr = formatStudentJSON(students[rn])
+        .split("\n")
+        .map((line, idx) =>
+          idx === 0 ? `    "${rn}": ${line}` : `    ${line}`
+        )
+        .join("\n");
+
+      lines.push(studentStr + (j < rollNos.length - 1 ? "," : ""));
+    });
+
+    lines.push(`  }${i < rollCodes.length - 1 ? "," : ""}`);
+  });
+
+  lines.push("}");
+
+  fs.writeFileSync(file, lines.join("\n"), "utf8");
+}
+
+// =============================
+// FETCH RESULT
 // =============================
 async function fetchResult(rc, rn) {
   try {
@@ -162,44 +217,52 @@ async function fetchResult(rc, rn) {
 // MAIN
 // =============================
 (async () => {
-  const schoolList = JSON.parse(fs.readFileSync(SCHOOL_LIST_FILE, "utf8"));
-
-  const rollCodes = Object.keys(schoolList)
-    .filter(rc => rc.startsWith(DISTRICT_PREFIX))
-    .sort((a, b) => a - b);
+  console.log("📂 Loading existing data...");
 
   let data = {};
   if (fs.existsSync(OUTPUT_PATH)) {
     data = JSON.parse(fs.readFileSync(OUTPUT_PATH, "utf8"));
   }
 
+  const schoolList = JSON.parse(fs.readFileSync(SCHOOL_LIST_FILE, "utf8"));
+
+  const rollCodes = Object.keys(schoolList)
+    .filter(rc => rc.startsWith(DISTRICT_PREFIX))
+    .sort((a, b) => Number(a) - Number(b));
+
   let totalSaved = 0;
 
-  for (const rc of rollCodes) {
-    if (!data[rc]) data[rc] = {};
+  for (let i = 0; i < rollCodes.length; i += ROLLCODE_PARALLEL) {
+    const chunk = rollCodes.slice(i, i + ROLLCODE_PARALLEL);
 
-    console.log(`🚀 Started ${rc} from ${START_ROLL}`);
+    await Promise.all(
+      chunk.map(async rc => {
+        if (!data[rc]) data[rc] = {};
 
-    for (let i = START_ROLL; i <= END_ROLL; i += BATCH_SIZE) {
-      const batch = [];
+        console.log(`🚀 Started ${rc} from ${ROLLNO_START}`);
 
-      for (let j = i; j < i + BATCH_SIZE && j <= END_ROLL; j++) {
-        if (!data[rc][j]) batch.push(j);
-      }
+        for (let rn = ROLLNO_START; rn <= ROLLNO_END; rn += BATCH_SIZE) {
+          const batch = [];
 
-      const results = await Promise.all(
-        batch.map(rn => fetchResult(rc, rn))
-      );
+          for (let k = rn; k < rn + BATCH_SIZE && k <= ROLLNO_END; k++) {
+            if (!data[rc][k]) batch.push(k);
+          }
 
-      results.forEach((res, idx) => {
-        if (res) {
-          const rn = batch[idx];
-          data[rc][rn] = res;
-          totalSaved++;
-          console.log(`✅ Saved ${rn}`);
+          const results = await Promise.all(
+            batch.map(r => fetchResult(rc, r))
+          );
+
+          results.forEach((res, idx) => {
+            if (res) {
+              const rollNo = batch[idx];
+              data[rc][rollNo] = res;
+              totalSaved++;
+              console.log(`✅ Saved ${rollNo}`);
+            }
+          });
         }
-      });
-    }
+      })
+    );
 
     saveJSON(OUTPUT_PATH, data);
   }
