@@ -5,8 +5,8 @@ const path = require("path");
 // =============================
 // 🔧 CHANGE EVERY RUN
 // =============================
-const DISTRICT_PREFIX = "92";
-const OUTPUT_FILE_NAME = "siwan-92-bseb-10th-full-result-2026.json";
+const DISTRICT_PREFIX = "24";
+const OUTPUT_FILE_NAME = "sheikhpura-24-bseb-10th-full-result-2026.json";
 
 // =============================
 const BASE_DIR = __dirname;
@@ -17,7 +17,7 @@ const SCHOOL_LIST_FILE = path.join(process.cwd(), "bseb-10th-school-list-2026.js
 
 // Roll range
 const START_ROLL = 2600001;
-const END_ROLL = 2600004;
+const END_ROLL = 2600999;
 
 // SPEED
 const CONCURRENCY = 150;
@@ -249,7 +249,7 @@ function saveJSON() {
             const rollNo = chunk[idx];
             data[rc][rollNo] = res;
             totalSaved++;
-            console.log(`Saved ${rollNo}`);
+            console.log(`✅ Saved ${rollNo}`);
           }
         });
       }
