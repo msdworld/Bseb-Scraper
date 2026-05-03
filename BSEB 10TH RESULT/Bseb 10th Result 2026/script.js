@@ -196,7 +196,7 @@ async function fetchResult(rc, rn) {
           const rn = batch[idx];
           data[rc][rn] = res;
           totalSaved++;
-          console.log(`Saved ${rn}`);
+          console.log(`✅ Saved ${rn}`);
         }
       });
     }
