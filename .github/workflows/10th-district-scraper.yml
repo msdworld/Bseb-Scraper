@@ -1,4 +1,4 @@
-name: 10th District Scraper
+name: BSEB 10th District Scraper
 
 on:
   workflow_dispatch:
@@ -12,45 +12,51 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout Repo (clean)
+      - name: Checkout Repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          persist-credentials: true
+          fetch-depth: 0   # 🔥 IMPORTANT (fix conflict issue)
 
-      - name: Reset to latest main (avoid conflict)
-        run: |
-          git fetch origin
-          git reset --hard origin/main
-
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install axios
+      - name: Install Dependencies
         run: npm install axios
 
-      - name: Run Scraper
-        run: node "BSEB 10TH RESULT/Bseb 10th Result 2026/script.js"
-
-      - name: Commit safely
+      - name: Show Initial Files
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "===== ROOT ====="
+          ls -lah
 
-          FILE=$(node -e "
-            const fs=require('fs');
-            const t=fs.readFileSync('BSEB 10TH RESULT/Bseb 10th Result 2026/script.js','utf8');
-            const m=t.match(/OUTPUT_FILE_NAME = \"([^\"]+)\"/);
-            console.log(m?m[1]:'');
-          ")
+          echo "===== 10TH FOLDER ====="
+          ls -lah "BSEB 10TH RESULT/Bseb 10th Result 2026" || true
 
-          echo "Detected file: $FILE"
+      - name: Run Scraper
+        run: |
+          node "BSEB 10TH RESULT/Bseb 10th Result 2026/script.js"
 
-          if [ -f "BSEB 10TH RESULT/Bseb 10th Result 2026/$FILE" ]; then
-            git add "BSEB 10TH RESULT/Bseb 10th Result 2026/$FILE"
-          fi
+      - name: Show Output
+        if: always()
+        run: |
+          echo "===== FINAL FILES ====="
+          ls -lah "BSEB 10TH RESULT/Bseb 10th Result 2026"
 
-          git commit -m "10th scrape update ($FILE)" || echo "No changes"
+      - name: Commit and Push
+        if: always()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
+          # ✅ ONLY ADD JSON FILES (NOT YAML)
+          find "BSEB 10TH RESULT/Bseb 10th Result 2026" -name "*.json" -print0 | xargs -0 git add
+
+          git status
+
+          git commit -m "Update 10th district data" || echo "No changes to commit"
+
+          # ✅ SAFE PUSH (NO REBASE, NO MERGE CONFLICT)
+          git pull origin main --no-rebase || true
           git push origin main
