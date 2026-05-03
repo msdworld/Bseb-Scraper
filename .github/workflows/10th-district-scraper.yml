@@ -1,0 +1,56 @@
+name: 10th District Scraper
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repo (clean)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reset to latest main (avoid conflict)
+        run: |
+          git fetch origin
+          git reset --hard origin/main
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install axios
+        run: npm install axios
+
+      - name: Run Scraper
+        run: node "BSEB 10TH RESULT/Bseb 10th Result 2026/script.js"
+
+      - name: Commit safely
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          FILE=$(node -e "
+            const fs=require('fs');
+            const t=fs.readFileSync('BSEB 10TH RESULT/Bseb 10th Result 2026/script.js','utf8');
+            const m=t.match(/OUTPUT_FILE_NAME = \"([^\"]+)\"/);
+            console.log(m?m[1]:'');
+          ")
+
+          echo "Detected file: $FILE"
+
+          if [ -f "BSEB 10TH RESULT/Bseb 10th Result 2026/$FILE" ]; then
+            git add "BSEB 10TH RESULT/Bseb 10th Result 2026/$FILE"
+          fi
+
+          git commit -m "10th scrape update ($FILE)" || echo "No changes"
+
+          git push origin main
