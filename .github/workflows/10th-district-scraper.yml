@@ -1,4 +1,4 @@
-name: BSEB 10th District Scraper
+name: 10th District Scraper
 
 on:
   workflow_dispatch:
@@ -8,55 +8,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
-    permissions:
-      contents: write
-
     steps:
-      - name: Checkout Repo
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-          fetch-depth: 0   # 🔥 IMPORTANT (fix conflict issue)
 
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "18"
 
-      - name: Install Dependencies
+      - name: Install deps
         run: npm install axios
 
-      - name: Show Initial Files
+      - name: Run scraper
+        run: node "BSEB 10TH RESULT/Bseb 10th Result 2026/script.js"
+
+      - name: Commit
         run: |
-          echo "===== ROOT ====="
-          ls -lah
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
 
-          echo "===== 10TH FOLDER ====="
-          ls -lah "BSEB 10TH RESULT/Bseb 10th Result 2026" || true
+          git add "BSEB 10TH RESULT/Bseb 10th Result 2026/*.json"
 
-      - name: Run Scraper
-        run: |
-          node "BSEB 10TH RESULT/Bseb 10th Result 2026/script.js"
+          git commit -m "Update district data" || echo "No changes"
 
-      - name: Show Output
-        if: always()
-        run: |
-          echo "===== FINAL FILES ====="
-          ls -lah "BSEB 10TH RESULT/Bseb 10th Result 2026"
-
-      - name: Commit and Push
-        if: always()
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          # ✅ ONLY ADD JSON FILES (NOT YAML)
-          find "BSEB 10TH RESULT/Bseb 10th Result 2026" -name "*.json" -print0 | xargs -0 git add
-
-          git status
-
-          git commit -m "Update 10th district data" || echo "No changes to commit"
-
-          # ✅ SAFE PUSH (NO REBASE, NO MERGE CONFLICT)
-          git pull origin main --no-rebase || true
-          git push origin main
+          git pull --rebase origin main
+          git push
