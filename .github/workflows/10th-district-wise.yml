@@ -41,7 +41,7 @@ jobs:
           # EDIT DISTRICTS HERE
           # =========================
           DISTRICTS = [
-              ("71", "patna"),
+              ("23", "lakhisarai"),
           ]
 
           # =========================
