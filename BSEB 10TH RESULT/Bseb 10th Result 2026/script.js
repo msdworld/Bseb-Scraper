@@ -12,7 +12,10 @@ const OUTPUT_FILE_NAME = "siwan-92-bseb-10th-full-result-2026.json";
 // =============================
 const BASE_DIR = __dirname;
 const OUTPUT_PATH = path.join(BASE_DIR, OUTPUT_FILE_NAME);
-const SCHOOL_LIST_PATH = path.join(__dirname, "bseb-10th-school-list-2026.json");
+const SCHOOL_LIST_PATH = path.join(
+  __dirname,
+  "../../../bseb-10th-school-list-2026.json"
+);
 
 // Roll range (10th)
 const START_ROLL = 2600001;
@@ -28,7 +31,9 @@ if (fs.existsSync(OUTPUT_PATH)) {
 }
 
 // Load school list
-const schoolList = JSON.parse(fs.readFileSync(SCHOOL_LIST_PATH, "utf8"));
+const schoolList = JSON.parse(
+  fs.readFileSync(SCHOOL_LIST_PATH, "utf8")
+);
 
 // Filter roll codes
 const rollCodes = Object.keys(schoolList)
