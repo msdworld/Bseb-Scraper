@@ -3,28 +3,25 @@ const fs = require("fs");
 const path = require("path");
 
 // =============================
-// 🔧 CHANGE EVERY RUN
+// CONFIG (EDIT EVERY RUN)
 // =============================
 const DISTRICT_PREFIX = "92";
-const OUTPUT_FILE_NAME = "siwan-92-bseb-10th-full-result-2026.json";
+const OUTPUT_FILE = "siwan-92-bseb-10th-full-result-2026.json";
 
 // =============================
-const BASE_DIR = __dirname;
-const OUTPUT_PATH = path.join(BASE_DIR, OUTPUT_FILE_NAME);
-const SCHOOL_LIST_FILE = path.join(process.cwd(), "bseb-10th-school-list-2026.json");
+const SCHOOL_LIST_FILE = path.resolve(process.cwd(), "bseb-10th-school-list-2026.json");
+const OUTPUT_PATH = path.join(__dirname, OUTPUT_FILE);
 
-// Roll range
-const ROLLNO_START = 2600001;
-const ROLLNO_END = 2600005;
+const START_ROLL = 2600001;
+const END_ROLL = 2600999;
 
 // SPEED
-const ROLLCODE_PARALLEL = 10;
-const CONCURRENCY = 200;
-const BATCH_SIZE = 999;
+const CONCURRENCY = 120;
+const BATCH_SIZE = 100;
 
 // =============================
-const API_URL = "https://resultapi.biharboardonline.org/result";
-
+// AXIOS
+// =============================
 const client = axios.create({
   timeout: 6000,
   headers: {
@@ -37,49 +34,37 @@ const client = axios.create({
 // =============================
 // HELPERS
 // =============================
-function clean(txt) {
-  return String(txt || "").replace(/\s+/g, " ").trim();
-}
-
-function normalizeMarks(val) {
-  if (!val) return "";
-  return String(Number(val));
-}
+const clean = v => String(v || "").trim();
+const num = v => (v ? String(Number(v)) : "");
 
 // =============================
-// SUBJECT LOGIC (FULL)
+// SUBJECT FORMATTER (KEEP YOUR LOGIC)
 // =============================
-function buildPractical(sub) {
-  const pw = normalizeMarks(sub.project_work);
-  const la = normalizeMarks(sub.literacy_activity);
-  const ia = normalizeMarks(sub.ia_sci);
-  const pr = normalizeMarks(sub.practical);
+function buildPractical(s) {
+  const pw = num(s.project_work);
+  const la = num(s.literacy_activity);
+  const sci = num(s.ia_sci);
+  const pr = num(s.practical);
 
-  if (sub.sub_code === "111") {
-    return [pw, la].filter(Boolean).join("+");
-  }
+  if (s.sub_code === "111") return [pw, la].filter(Boolean).join("+");
+  if (s.sub_code === "112") return sci || pr;
 
-  if (sub.sub_code === "112") {
-    return ia || pr;
-  }
-
-  return pr || [pw, la, ia].filter(Boolean).join("+");
+  return pr || [pw, la, sci].filter(Boolean).join("+");
 }
 
-function formatSubjects(subjects = []) {
-  return subjects.map(sub => {
+function formatSubjects(arr = []) {
+  return arr.map(s => {
     const obj = {
-      subCode: clean(sub.sub_code),
-      subject: clean(sub.sub_name),
-      theory: normalizeMarks(sub.theory),
-      subGroupId: clean(sub.sub_group_id),
-      subTotal: normalizeMarks(sub.sub_total)
+      subCode: clean(s.sub_code),
+      subject: clean(s.sub_name),
+      theory: num(s.theory),
+      subGroupId: clean(s.sub_group_id),
+      subTotal: num(s.sub_total)
     };
 
-    const practical = buildPractical(sub);
-    if (practical) obj.practical = practical;
-
-    if (sub.sub_result) obj.subResult = clean(sub.sub_result);
+    const p = buildPractical(s);
+    if (p) obj.practical = p;
+    if (s.sub_result) obj.subResult = clean(s.sub_result);
 
     return obj;
   });
@@ -88,90 +73,86 @@ function formatSubjects(subjects = []) {
 // =============================
 // STUDENT FORMAT
 // =============================
-function formatStudent(data) {
-  const student = {
-    studentName: clean(data.name),
-    fatherName: clean(data.father_name),
-    regNumber: clean(data.reg_no),
-    BSEBUniqueId: clean(data.bseb_id),
-    schoolName: clean(data.school_name),
-    rollCode: clean(data.roll_code),
-    rollNo: clean(data.roll_no),
-    examType: clean(data.exam_type),
-    totalMarks: normalizeMarks(data.total),
-    division: clean(data.division)
+function formatStudent(d) {
+  return {
+    studentName: clean(d.name),
+    fatherName: clean(d.father_name),
+    regNumber: clean(d.reg_no),
+    BSEBUniqueId: clean(d.bseb_id),
+    schoolName: clean(d.school_name),
+    rollCode: clean(d.roll_code),
+    rollNo: clean(d.roll_no),
+    examType: clean(d.exam_type),
+    totalMarks: num(d.total),
+    division: clean(d.division),
+    passedUnderRegulation: clean(d.passed_under_regulation),
+    subjects: formatSubjects(d.subjects)
   };
-
-  if (data.passed_under_regulation) {
-    student.passedUnderRegulation = clean(data.passed_under_regulation);
-  }
-
-  student.subjects = formatSubjects(data.subjects || []);
-
-  return student;
 }
 
 // =============================
-// SAVE JSON (🔥 FIXED)
+// SAVE FORMAT (🔥 EXACT MATCH)
 // =============================
-function saveCustomJSON(file, data) {
-  const rollCodes = Object.keys(data).sort((a, b) => Number(a) - Number(b));
+function saveJSON(file, data) {
+  const rcList = Object.keys(data).sort((a, b) => a - b);
 
-  const lines = [];
-  lines.push("{");
+  const out = [];
+  out.push("{");
 
-  rollCodes.forEach((rc, rc_i) => {
-    lines.push(`  "${rc}": {`);
+  rcList.forEach((rc, i) => {
+    out.push(`  "${rc}": {`);
 
     const students = data[rc];
-    const rollNos = Object.keys(students).sort((a, b) => Number(a) - Number(b));
+    const rnList = Object.keys(students).sort((a, b) => a - b);
 
-    rollNos.forEach((rn, rn_i) => {
-      const student = { ...students[rn] };
+    rnList.forEach((rn, j) => {
+      const st = students[rn];
 
-      const subjects = student.subjects || [];
-      const subjectsStr = JSON.stringify(subjects); // one-line
+      const subjects = st.subjects;
+      const subjectsStr = JSON.stringify(subjects);
 
-      delete student.subjects;
+      const { subjects: _, ...rest } = st;
+      const base = JSON.stringify(rest, null, 6).split("\n");
 
-      const json = JSON.stringify(student, null, 6).split("\n");
-
-      json.forEach((line, idx) => {
+      base.forEach((line, idx) => {
         if (idx === 0) {
-          lines.push(`    "${rn}": ${line}`);
-        } else if (idx === json.length - 1) {
-          lines.push(`      ,"subjects": ${subjectsStr}`);
-          lines.push(`    }${rn_i < rollNos.length - 1 ? "," : ""}`);
+          out.push(`    "${rn}": ${line}`);
         } else {
-          lines.push(`    ${line}`);
+          out.push(`    ${line}`);
         }
       });
+
+      // 👇 SUBJECTS ONE PER LINE
+      out.push(`      ,"subjects": [`);
+      subjects.forEach((sub, k) => {
+        const line = JSON.stringify(sub);
+        out.push(`        ${line}${k < subjects.length - 1 ? "," : ""}`);
+      });
+      out.push(`      ]`);
+
+      out.push(`    }${j < rnList.length - 1 ? "," : ""}`);
     });
 
-    lines.push(`  }${rc_i < rollCodes.length - 1 ? "," : ""}`);
+    out.push(`  }${i < rcList.length - 1 ? "," : ""}`);
   });
 
-  lines.push("}");
+  out.push("}");
 
-  fs.writeFileSync(file, lines.join("\n"), "utf8");
+  fs.writeFileSync(file, out.join("\n"));
 }
 
 // =============================
-// FETCH RESULT
+// FETCH
 // =============================
-async function fetchStudent(rollCode, rollNo) {
+async function fetchResult(rc, rn) {
   try {
-    const res = await client.get(API_URL, {
-      params: { roll_code: rollCode, roll_no: rollNo }
+    const res = await client.get("https://resultapi.biharboardonline.org/result", {
+      params: { roll_code: rc, roll_no: rn }
     });
 
     if (!res.data?.success) return null;
 
-    const data = formatStudent(res.data.data);
-
-    if (!data.studentName) return null;
-
-    return data;
+    return formatStudent(res.data.data);
   } catch {
     return null;
   }
@@ -181,65 +162,46 @@ async function fetchStudent(rollCode, rollNo) {
 // MAIN
 // =============================
 (async () => {
-  console.log("📂 Loading existing data...");
-
-  let output = {};
-  if (fs.existsSync(OUTPUT_PATH)) {
-    output = JSON.parse(fs.readFileSync(OUTPUT_PATH, "utf8"));
-  }
-
   const schoolList = JSON.parse(fs.readFileSync(SCHOOL_LIST_FILE, "utf8"));
 
   const rollCodes = Object.keys(schoolList)
     .filter(rc => rc.startsWith(DISTRICT_PREFIX))
-    .sort((a, b) => Number(a) - Number(b));
+    .sort((a, b) => a - b);
+
+  let data = {};
+  if (fs.existsSync(OUTPUT_PATH)) {
+    data = JSON.parse(fs.readFileSync(OUTPUT_PATH, "utf8"));
+  }
 
   let totalSaved = 0;
 
-  for (let i = 0; i < rollCodes.length; i += ROLLCODE_PARALLEL) {
-    const chunk = rollCodes.slice(i, i + ROLLCODE_PARALLEL);
+  for (const rc of rollCodes) {
+    if (!data[rc]) data[rc] = {};
 
-    await Promise.all(chunk.map(async rc => {
-      if (!output[rc]) output[rc] = {};
+    console.log(`🚀 Started ${rc} from ${START_ROLL}`);
 
-      console.log(`🚀 Started ${rc} from ${ROLLNO_START}`);
+    for (let i = START_ROLL; i <= END_ROLL; i += BATCH_SIZE) {
+      const batch = [];
 
-      let saved = 0;
-
-      for (let rn = ROLLNO_START; rn <= ROLLNO_END; rn += BATCH_SIZE) {
-        const batch = [];
-
-        for (let j = rn; j < rn + BATCH_SIZE && j <= ROLLNO_END; j++) {
-          batch.push(j);
-        }
-
-        for (let k = 0; k < batch.length; k += CONCURRENCY) {
-          const sub = batch.slice(k, k + CONCURRENCY);
-
-          const results = await Promise.all(
-            sub.map(n => fetchStudent(rc, n))
-          );
-
-          results.forEach((res, idx) => {
-            const rollNo = sub[idx];
-
-            if (res && !output[rc][rollNo]) {
-              output[rc][rollNo] = res;
-              saved++;
-              totalSaved++;
-
-              console.log(`✅ Saved ${rollNo}`);
-            }
-          });
-        }
+      for (let j = i; j < i + BATCH_SIZE && j <= END_ROLL; j++) {
+        if (!data[rc][j]) batch.push(j);
       }
 
-      console.log(`${rc} -> ${saved} saved`);
-    }));
+      const results = await Promise.all(
+        batch.map(rn => fetchResult(rc, rn))
+      );
 
-    saveCustomJSON(OUTPUT_PATH, output);
+      results.forEach((res, idx) => {
+        if (res) {
+          const rn = batch[idx];
+          data[rc][rn] = res;
+          totalSaved++;
+          console.log(`Saved ${rn}`);
+        }
+      });
+    }
 
-    console.log("💾 Saved progress...");
+    saveJSON(OUTPUT_PATH, data);
   }
 
   console.log("================================");
