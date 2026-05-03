@@ -13,7 +13,7 @@ const SCHOOL_LIST_FILE = path.resolve(process.cwd(), "bseb-10th-school-list-2026
 const OUTPUT_PATH = path.join(__dirname, OUTPUT_FILE);
 
 const START_ROLL = 2600001;
-const END_ROLL = 2600999;
+const END_ROLL = 2600005;
 
 // SPEED
 const CONCURRENCY = 120;
