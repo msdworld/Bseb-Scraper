@@ -1,89 +1,67 @@
-name: Fix Corrupted District File (Final Safe Fix)
+name: Fix Single District JSON
 
 on:
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   fix-json:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout Repo
+      - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - name: 🔧 Fix JSON Properly
+      - name: Fix JSON File
         run: |
-          cat << 'PYCODE' > fix.py
+          python << 'EOF'
           import os
+          import re
           import json
 
           FILE_PATH = "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
 
-          print("📂 Reading file...")
+          print(f"📂 Fixing file: {FILE_PATH}")
+
+          if not os.path.exists(FILE_PATH):
+              print("❌ File not found")
+              exit()
 
           with open(FILE_PATH, "r", encoding="utf-8") as f:
-              raw = f.read()
+              content = f.read()
 
-          # ✅ Extract valid JSON block
-          stack = []
-          end_index = -1
+          # 🔥 Fix broken subjects placement
+          content = re.sub(
+              r'\}\s*,\s*"subjects"\s*:\s*(\[[^\]]*\])',
+              r',"subjects": \1\n    }',
+              content
+          )
 
-          for i, ch in enumerate(raw):
-              if ch == "{":
-                  stack.append("{")
-              elif ch == "}":
-                  if stack:
-                      stack.pop()
-                      if not stack:
-                          end_index = i
-                          break
+          # 🔥 Remove trailing commas
+          content = re.sub(r",\s*}", "}", content)
 
-          cleaned_raw = raw[:end_index + 1]
+          # Try parsing
+          try:
+              data = json.loads(content)
+              print("✅ JSON fixed successfully")
+          except Exception as e:
+              print("❌ Still invalid:", e)
+              exit()
 
-          data = json.loads(cleaned_raw)
-          print("✅ JSON recovered")
-
-          fixed = {}
-          removed_invalid = 0
-
-          for rc, students in data.items():
-              fixed[rc] = {}
-
-              for key, value in students.items():
-
-                  # ✅ keep ONLY numeric roll numbers
-                  if not str(key).isdigit():
-                      removed_invalid += 1
-                      continue
-
-                  fixed[rc][key] = value
-
-          print(f"🧹 Removed invalid keys: {removed_invalid}")
-
-          # ✅ Save clean JSON
+          # Save clean formatted JSON
           with open(FILE_PATH, "w", encoding="utf-8") as f:
-              json.dump(fixed, f, ensure_ascii=False, indent=2)
+              json.dump(data, f, ensure_ascii=False, indent=2)
 
-          print("💾 File fully cleaned & fixed")
-          PYCODE
+          print("💾 File saved successfully")
+          EOF
 
-          python fix.py
-
-      - name: 🚀 Commit & Push
+      - name: Commit & Push
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add .
-          git commit -m "Fix corrupted JSON structure" || echo "No changes"
+          git add "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
 
-          git pull --rebase origin main
+          git commit -m "Fix single district JSON" || echo "No changes"
+
+          git pull --rebase origin main || true
           git push
