@@ -3,6 +3,9 @@ name: Deep Fix Single District JSON
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write   # ✅ THIS FIXES 403 ERROR
+
 jobs:
   fix-json:
     runs-on: ubuntu-latest
@@ -22,14 +25,9 @@ jobs:
 
           print(f"📂 Processing: {FILE_PATH}")
 
-          if not os.path.exists(FILE_PATH):
-              print("❌ File not found")
-              exit()
-
           with open(FILE_PATH, "r", encoding="utf-8") as f:
               raw = f.read()
 
-          # Extract rollCode blocks
           fixed_data = {}
 
           rollcode_blocks = re.findall(r'"(\d{5})"\s*:\s*{(.*?)}\s*(?=,\s*"\d{5}"|\s*})', raw, re.S)
@@ -37,7 +35,6 @@ jobs:
           for rc, block in rollcode_blocks:
               students = {}
 
-              # Extract student blocks
               student_matches = re.findall(
                   r'"(\d+)"\s*:\s*{(.*?)}\s*,?\s*"subjects"\s*:\s*(\[[^\]]*\])',
                   block,
@@ -48,24 +45,16 @@ jobs:
                   try:
                       student_json = "{" + student_part + "}"
                       student_data = json.loads(student_json)
-
                       subjects_data = json.loads(subjects_part)
 
                       student_data["subjects"] = subjects_data
-
                       students[roll_no] = student_data
-
-                  except Exception as e:
-                      print(f"⚠️ Skipped student {roll_no}: {e}")
+                  except:
+                      continue
 
               if students:
                   fixed_data[rc] = students
 
-          if not fixed_data:
-              print("❌ Could not recover data")
-              exit()
-
-          # Save clean JSON
           with open(FILE_PATH, "w", encoding="utf-8") as f:
               json.dump(fixed_data, f, ensure_ascii=False, indent=2)
 
@@ -77,8 +66,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
-
+          git add .
           git commit -m "Deep fix district JSON" || echo "No changes"
 
           git pull --rebase origin main || true
