@@ -1,4 +1,4 @@
-name: Fix Corrupted District File
+name: Fix Corrupted District File (Strong Fix)
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: 🔧 Fix Corrupted JSON File
+      - name: 🔧 Deep Fix JSON
         run: |
           cat << 'PYCODE' > fix.py
           import os
@@ -32,26 +32,37 @@ jobs:
               exit(1)
 
           print("📂 Reading file...")
-
           with open(FILE_PATH, "r", encoding="utf-8") as f:
               raw = f.read()
 
-          # 🔥 Fix broken JSON (cut after last })
-          last_brace = raw.rfind("}")
-          if last_brace == -1:
-              print("❌ Invalid JSON completely")
+          # 🔥 Extract ONLY first valid JSON object
+          stack = []
+          end_index = -1
+
+          for i, ch in enumerate(raw):
+              if ch == "{":
+                  stack.append("{")
+              elif ch == "}":
+                  if stack:
+                      stack.pop()
+                      if not stack:
+                          end_index = i
+                          break
+
+          if end_index == -1:
+              print("❌ Could not find valid JSON block")
               exit(1)
 
-          cleaned_raw = raw[:last_brace + 1]
+          cleaned_raw = raw[:end_index + 1]
 
           try:
               data = json.loads(cleaned_raw)
-              print("✅ JSON recovered")
+              print("✅ JSON recovered safely")
           except Exception as e:
               print("❌ Still invalid JSON:", e)
               exit(1)
 
-          # 🔥 Remove last student from each roll code
+          # 🔥 Remove last student (corruption source)
           removed = 0
           for rc in data:
               students = data[rc]
@@ -66,22 +77,22 @@ jobs:
 
           print(f"🗑 Removed last student from {removed} roll codes")
 
-          # 🔥 Save clean JSON (NORMAL JSON, no custom formatting)
+          # 🔥 Save CLEAN JSON
           with open(FILE_PATH, "w", encoding="utf-8") as f:
               json.dump(data, f, ensure_ascii=False, indent=2)
 
-          print("💾 File saved successfully")
+          print("💾 File fixed & saved")
           PYCODE
 
           python fix.py
 
-      - name: 🚀 Commit & Push Changes
+      - name: 🚀 Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add .
-          git commit -m "Fix corrupted district JSON" || echo "No changes to commit"
+          git commit -m "Deep fix corrupted JSON" || echo "No changes"
 
           git pull --rebase origin main
           git push
