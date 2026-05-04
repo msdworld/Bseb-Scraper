@@ -1,10 +1,10 @@
-name: Fix JSON Perfect Structure
+name: Final JSON Fix (Recover + Correct Structure)
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # ✅ THIS FIXES 403 ERROR
+  contents: write
 
 jobs:
   fix:
@@ -13,19 +13,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fix JSON
+      - name: Recover + Fix JSON
         run: |
           python <<EOF
           import json
-          import os
 
           FILE_PATH = "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
 
-          print("Processing:", FILE_PATH)
+          print("📂 Reading raw file...")
 
           with open(FILE_PATH, "r", encoding="utf-8") as f:
-              data = json.load(f)
+              raw = f.read()
 
+          # =========================
+          # STEP 1: RECOVER VALID JSON
+          # =========================
+          stack = []
+          end_index = 0
+
+          for i, ch in enumerate(raw):
+              if ch == "{":
+                  stack.append("{")
+              elif ch == "}":
+                  if stack:
+                      stack.pop()
+                  if not stack:
+                      end_index = i + 1
+                      break
+
+          clean_raw = raw[:end_index]
+
+          print("✅ JSON safely recovered")
+
+          data = json.loads(clean_raw)
+
+          # =========================
+          # STEP 2: FIX STRUCTURE
+          # =========================
           def save_json(file, data):
               with open(file, "w", encoding="utf-8") as f:
                   f.write("{\n")
@@ -40,21 +64,17 @@ jobs:
 
                       for rn_i, rn in enumerate(rn_keys):
                           student = students[rn].copy()
-
                           subjects = student.pop("subjects", [])
 
-                          # Convert subjects → one-line objects
+                          # Convert subjects to one-line
                           subjects_lines = [
                               json.dumps(s, ensure_ascii=False, separators=(",", ":"))
                               for s in subjects
                           ]
 
-                          # Convert student JSON WITHOUT closing }
+                          # Convert student JSON (without closing })
                           student_json = json.dumps(student, ensure_ascii=False, indent=6)
-                          lines = student_json.splitlines()
-
-                          # REMOVE last closing brace
-                          lines = lines[:-1]
+                          lines = student_json.splitlines()[:-1]  # remove last }
 
                           for i, line in enumerate(lines):
                               if i == 0:
@@ -62,14 +82,13 @@ jobs:
                               else:
                                   f.write(f'    {line}\n')
 
-                          # ✅ ADD subjects INSIDE object
-                          f.write(f'      ,"subjects": [\n')
+                          # ✅ ADD subjects INSIDE
+                          f.write('      ,"subjects": [\n')
                           for si, s in enumerate(subjects_lines):
                               comma = "," if si < len(subjects_lines) - 1 else ""
                               f.write(f'        {s}{comma}\n')
-                          f.write("      ]\n")
+                          f.write('      ]\n')
 
-                          # CLOSE student properly
                           f.write("    }")
 
                           if rn_i < len(rn_keys) - 1:
@@ -86,14 +105,14 @@ jobs:
 
           save_json(FILE_PATH, data)
 
-          print("✅ PERFECT STRUCTURE FIXED")
+          print("🎉 FULL FIX DONE (STRUCTURE + FORMAT)")
           EOF
 
-      - name: Commit
+      - name: Commit & Push
         run: |
-          git config --global user.name "Manish"
-          git config --global user.email "you@example.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "actions@github.com"
 
           git add .
-          git commit -m "Fix JSON structure correctly" || echo "No changes"
+          git commit -m "Final JSON fix (recover + correct structure)" || echo "No changes"
           git push
