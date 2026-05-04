@@ -1,4 +1,4 @@
-name: Fix JSON Format (Final)
+name: Deep Fix Single District JSON
 
 on:
   workflow_dispatch:
@@ -7,108 +7,67 @@ permissions:
   contents: write   # ✅ THIS FIXES 403 ERROR
 
 jobs:
-  fix:
+  fix-json:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: Fix JSON format
+      - name: Deep Fix JSON
         run: |
-          python <<EOF
+          python << 'EOF'
+          import os
           import json
           import re
-          import os
 
           FILE_PATH = "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
 
-          print("Processing:", FILE_PATH)
+          print(f"📂 Processing: {FILE_PATH}")
 
           with open(FILE_PATH, "r", encoding="utf-8") as f:
               raw = f.read()
 
-          # -------- STEP 1: RECOVER VALID JSON --------
-          stack = []
-          end = 0
+          fixed_data = {}
 
-          for i, ch in enumerate(raw):
-              if ch == "{":
-                  stack.append("{")
-              elif ch == "}":
-                  if stack:
-                      stack.pop()
-                  if not stack:
-                      end = i + 1
-                      break
+          rollcode_blocks = re.findall(r'"(\d{5})"\s*:\s*{(.*?)}\s*(?=,\s*"\d{5}"|\s*})', raw, re.S)
 
-          clean = raw[:end]
+          for rc, block in rollcode_blocks:
+              students = {}
 
-          data = json.loads(clean)
+              student_matches = re.findall(
+                  r'"(\d+)"\s*:\s*{(.*?)}\s*,?\s*"subjects"\s*:\s*(\[[^\]]*\])',
+                  block,
+                  re.S
+              )
 
-          # -------- STEP 2: SAVE IN COMPACT SUBJECT FORMAT --------
-          def save_json(file, data):
-              with open(file, "w", encoding="utf-8") as f:
-                  f.write("{\n")
+              for roll_no, student_part, subjects_part in student_matches:
+                  try:
+                      student_json = "{" + student_part + "}"
+                      student_data = json.loads(student_json)
+                      subjects_data = json.loads(subjects_part)
 
-                  rc_keys = sorted(data.keys(), key=lambda x: int(x))
+                      student_data["subjects"] = subjects_data
+                      students[roll_no] = student_data
+                  except:
+                      continue
 
-                  for rc_i, rc in enumerate(rc_keys):
-                      f.write(f'  "{rc}": {{\n')
+              if students:
+                  fixed_data[rc] = students
 
-                      students = data[rc]
-                      rn_keys = sorted(students.keys(), key=lambda x: int(x))
+          with open(FILE_PATH, "w", encoding="utf-8") as f:
+              json.dump(fixed_data, f, ensure_ascii=False, indent=2)
 
-                      for rn_i, rn in enumerate(rn_keys):
-                          student = students[rn].copy()
-
-                          subjects = student.pop("subjects", [])
-
-                          # 🔥 compact subjects (ONE LINE EACH OBJECT)
-                          subjects_lines = []
-                          for sub in subjects:
-                              subjects_lines.append(json.dumps(sub, ensure_ascii=False, separators=(",", ":")))
-
-                          # student basic
-                          student_json = json.dumps(student, ensure_ascii=False, indent=6)
-                          lines = student_json.splitlines()
-
-                          for i, line in enumerate(lines):
-                              if i == 0:
-                                  f.write(f'    "{rn}": {line}\n')
-                              else:
-                                  f.write(f'    {line}\n')
-
-                          # 🔥 subjects block EXACT like your scraper
-                          f.write(f'      ,"subjects": [\n')
-                          for si, s in enumerate(subjects_lines):
-                              comma = "," if si < len(subjects_lines) - 1 else ""
-                              f.write(f'        {s}{comma}\n')
-                          f.write("      ]\n")
-
-                          f.write("    }")
-
-                          if rn_i < len(rn_keys) - 1:
-                              f.write(",\n")
-                          else:
-                              f.write("\n")
-
-                      f.write("  }")
-                      if rc_i < len(rc_keys) - 1:
-                          f.write(",")
-                      f.write("\n")
-
-                  f.write("}\n")
-
-          save_json(FILE_PATH, data)
-
-          print("✅ PERFECT FORMAT DONE")
+          print("✅ FULL RECOVERY DONE")
           EOF
 
-      - name: Commit changes
+      - name: Commit & Push
         run: |
-          git config --global user.name "Manish"
-          git config --global user.email "you@example.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
           git add .
-          git commit -m "Fix JSON to scraper format" || echo "No changes"
+          git commit -m "Deep fix district JSON" || echo "No changes"
+
+          git pull --rebase origin main || true
           git push
