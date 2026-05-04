@@ -1,96 +1,87 @@
- - name: Fix Corrupted District File
-  run: |
-    python << 'EOF'
-    import os
-    import json
+name: Fix Corrupted District File
 
-    FILE_PATH = "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
+on:
+  workflow_dispatch:
 
-    if not os.path.exists(FILE_PATH):
-        print("❌ File not found")
-        exit()
+permissions:
+  contents: write
 
-    print("📂 Reading file...")
+jobs:
+  fix-json:
+    runs-on: ubuntu-latest
 
-    raw = open(FILE_PATH, "r", encoding="utf-8").read()
+    steps:
+      - name: 📥 Checkout Repo
+        uses: actions/checkout@v4
 
-    # Cut till last valid }
-    last_brace = raw.rfind("}")
-    if last_brace == -1:
-        print("❌ Invalid JSON completely")
-        exit()
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
 
-    cleaned_raw = raw[:last_brace + 1]
+      - name: 🔧 Fix Corrupted JSON File
+        run: |
+          cat << 'PYCODE' > fix.py
+          import os
+          import json
 
-    try:
-        data = json.loads(cleaned_raw)
-        print("✅ JSON recovered")
-    except Exception as e:
-        print("❌ Still invalid JSON:", e)
-        exit()
+          FILE_PATH = "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
 
-    # Remove last student from each roll code
-    removed = 0
-    for rc in data:
-        students = data[rc]
-        if not students:
-            continue
+          if not os.path.exists(FILE_PATH):
+              print("❌ File not found")
+              exit(1)
 
-        roll_nos = sorted(students.keys(), key=lambda x: int(x))
-        last_rn = roll_nos[-1]
+          print("📂 Reading file...")
 
-        del students[last_rn]
-        removed += 1
+          with open(FILE_PATH, "r", encoding="utf-8") as f:
+              raw = f.read()
 
-    print(f"🗑 Removed last student from {removed} roll codes")
+          # 🔥 Fix broken JSON (cut after last })
+          last_brace = raw.rfind("}")
+          if last_brace == -1:
+              print("❌ Invalid JSON completely")
+              exit(1)
 
-    # Save in correct format
-    def save_json(file, data):
-        roll_codes = sorted(data.keys(), key=lambda x: int(x))
+          cleaned_raw = raw[:last_brace + 1]
 
-        with open(file, "w", encoding="utf-8") as f:
-            f.write("{\n")
+          try:
+              data = json.loads(cleaned_raw)
+              print("✅ JSON recovered")
+          except Exception as e:
+              print("❌ Still invalid JSON:", e)
+              exit(1)
 
-            for rc_i, rc in enumerate(roll_codes):
-                f.write(f'  "{rc}": {{\n')
+          # 🔥 Remove last student from each roll code
+          removed = 0
+          for rc in data:
+              students = data[rc]
+              if not students:
+                  continue
 
-                students = data[rc]
-                roll_nos = sorted(students.keys(), key=lambda x: int(x))
+              roll_nos = sorted(students.keys(), key=lambda x: int(x))
+              last_rn = roll_nos[-1]
 
-                for rn_i, rn in enumerate(roll_nos):
-                    student = students[rn].copy()
+              del students[last_rn]
+              removed += 1
 
-                    subjects = student.get("subjects", [])
-                    subjects_str = json.dumps(subjects, ensure_ascii=False, separators=(",", ":"))
+          print(f"🗑 Removed last student from {removed} roll codes")
 
-                    student.pop("subjects", None)
+          # 🔥 Save clean JSON (NORMAL JSON, no custom formatting)
+          with open(FILE_PATH, "w", encoding="utf-8") as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
 
-                    student_json = json.dumps(student, ensure_ascii=False, indent=6)
-                    lines = student_json.splitlines()
+          print("💾 File saved successfully")
+          PYCODE
 
-                    for i, line in enumerate(lines):
-                        if i == 0:
-                            f.write(f'    "{rn}": {line}\n')
-                        else:
-                            f.write(f'    {line}\n')
+          python fix.py
 
-                    f.write(f'      ,"subjects": {subjects_str}\n')
-                    f.write("    }")
+      - name: 🚀 Commit & Push Changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-                    if rn_i < len(roll_nos) - 1:
-                        f.write(",\n")
-                    else:
-                        f.write("\n")
+          git add .
+          git commit -m "Fix corrupted district JSON" || echo "No changes to commit"
 
-                f.write("  }")
-                if rc_i < len(roll_codes) - 1:
-                    f.write(",")
-                f.write("\n")
-
-            f.write("}\n")
-
-    print("💾 Saving cleaned file...")
-    save_json(FILE_PATH, data)
-
-    print("🎉 FILE FIXED SUCCESSFULLY")
-    EOF
+          git pull --rebase origin main
+          git push
