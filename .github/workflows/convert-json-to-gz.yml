@@ -1,4 +1,4 @@
-name: Fix Corrupted District File (Strong Fix)
+name: Fix Corrupted District File (Final Safe Fix)
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: 🔧 Deep Fix JSON
+      - name: 🔧 Fix JSON Properly
         run: |
           cat << 'PYCODE' > fix.py
           import os
@@ -27,15 +27,12 @@ jobs:
 
           FILE_PATH = "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
 
-          if not os.path.exists(FILE_PATH):
-              print("❌ File not found")
-              exit(1)
-
           print("📂 Reading file...")
+
           with open(FILE_PATH, "r", encoding="utf-8") as f:
               raw = f.read()
 
-          # 🔥 Extract ONLY first valid JSON object
+          # ✅ Extract valid JSON block
           stack = []
           end_index = -1
 
@@ -49,39 +46,33 @@ jobs:
                           end_index = i
                           break
 
-          if end_index == -1:
-              print("❌ Could not find valid JSON block")
-              exit(1)
-
           cleaned_raw = raw[:end_index + 1]
 
-          try:
-              data = json.loads(cleaned_raw)
-              print("✅ JSON recovered safely")
-          except Exception as e:
-              print("❌ Still invalid JSON:", e)
-              exit(1)
+          data = json.loads(cleaned_raw)
+          print("✅ JSON recovered")
 
-          # 🔥 Remove last student (corruption source)
-          removed = 0
-          for rc in data:
-              students = data[rc]
-              if not students:
-                  continue
+          fixed = {}
+          removed_invalid = 0
 
-              roll_nos = sorted(students.keys(), key=lambda x: int(x))
-              last_rn = roll_nos[-1]
+          for rc, students in data.items():
+              fixed[rc] = {}
 
-              del students[last_rn]
-              removed += 1
+              for key, value in students.items():
 
-          print(f"🗑 Removed last student from {removed} roll codes")
+                  # ✅ keep ONLY numeric roll numbers
+                  if not str(key).isdigit():
+                      removed_invalid += 1
+                      continue
 
-          # 🔥 Save CLEAN JSON
+                  fixed[rc][key] = value
+
+          print(f"🧹 Removed invalid keys: {removed_invalid}")
+
+          # ✅ Save clean JSON
           with open(FILE_PATH, "w", encoding="utf-8") as f:
-              json.dump(data, f, ensure_ascii=False, indent=2)
+              json.dump(fixed, f, ensure_ascii=False, indent=2)
 
-          print("💾 File fixed & saved")
+          print("💾 File fully cleaned & fixed")
           PYCODE
 
           python fix.py
@@ -92,7 +83,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add .
-          git commit -m "Deep fix corrupted JSON" || echo "No changes"
+          git commit -m "Fix corrupted JSON structure" || echo "No changes"
 
           git pull --rebase origin main
           git push
