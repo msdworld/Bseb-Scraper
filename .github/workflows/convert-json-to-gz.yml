@@ -1,4 +1,4 @@
-name: Fix Single District JSON
+name: Deep Fix Single District JSON
 
 on:
   workflow_dispatch:
@@ -11,47 +11,65 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: Fix JSON File
+      - name: Deep Fix JSON
         run: |
           python << 'EOF'
           import os
-          import re
           import json
+          import re
 
           FILE_PATH = "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
 
-          print(f"📂 Fixing file: {FILE_PATH}")
+          print(f"📂 Processing: {FILE_PATH}")
 
           if not os.path.exists(FILE_PATH):
               print("❌ File not found")
               exit()
 
           with open(FILE_PATH, "r", encoding="utf-8") as f:
-              content = f.read()
+              raw = f.read()
 
-          # 🔥 Fix broken subjects placement
-          content = re.sub(
-              r'\}\s*,\s*"subjects"\s*:\s*(\[[^\]]*\])',
-              r',"subjects": \1\n    }',
-              content
-          )
+          # Extract rollCode blocks
+          fixed_data = {}
 
-          # 🔥 Remove trailing commas
-          content = re.sub(r",\s*}", "}", content)
+          rollcode_blocks = re.findall(r'"(\d{5})"\s*:\s*{(.*?)}\s*(?=,\s*"\d{5}"|\s*})', raw, re.S)
 
-          # Try parsing
-          try:
-              data = json.loads(content)
-              print("✅ JSON fixed successfully")
-          except Exception as e:
-              print("❌ Still invalid:", e)
+          for rc, block in rollcode_blocks:
+              students = {}
+
+              # Extract student blocks
+              student_matches = re.findall(
+                  r'"(\d+)"\s*:\s*{(.*?)}\s*,?\s*"subjects"\s*:\s*(\[[^\]]*\])',
+                  block,
+                  re.S
+              )
+
+              for roll_no, student_part, subjects_part in student_matches:
+                  try:
+                      student_json = "{" + student_part + "}"
+                      student_data = json.loads(student_json)
+
+                      subjects_data = json.loads(subjects_part)
+
+                      student_data["subjects"] = subjects_data
+
+                      students[roll_no] = student_data
+
+                  except Exception as e:
+                      print(f"⚠️ Skipped student {roll_no}: {e}")
+
+              if students:
+                  fixed_data[rc] = students
+
+          if not fixed_data:
+              print("❌ Could not recover data")
               exit()
 
-          # Save clean formatted JSON
+          # Save clean JSON
           with open(FILE_PATH, "w", encoding="utf-8") as f:
-              json.dump(data, f, ensure_ascii=False, indent=2)
+              json.dump(fixed_data, f, ensure_ascii=False, indent=2)
 
-          print("💾 File saved successfully")
+          print("✅ FULL RECOVERY DONE")
           EOF
 
       - name: Commit & Push
@@ -61,7 +79,7 @@ jobs:
 
           git add "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
 
-          git commit -m "Fix single district JSON" || echo "No changes"
+          git commit -m "Deep fix district JSON" || echo "No changes"
 
           git pull --rebase origin main || true
           git push
