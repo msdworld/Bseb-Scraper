@@ -1,4 +1,4 @@
-name: Fix JSON Format (Final)
+name: Fix JSON Perfect Structure
 
 on:
   workflow_dispatch:
@@ -11,14 +11,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Fix JSON format
+      - name: Fix JSON
         run: |
           python <<EOF
           import json
-          import re
           import os
 
           FILE_PATH = "BSEB 10TH RESULT/Bseb 10th Result 2026/sheikhpura-24-bseb-10th-full-result-2026.json"
@@ -26,27 +24,8 @@ jobs:
           print("Processing:", FILE_PATH)
 
           with open(FILE_PATH, "r", encoding="utf-8") as f:
-              raw = f.read()
+              data = json.load(f)
 
-          # -------- STEP 1: RECOVER VALID JSON --------
-          stack = []
-          end = 0
-
-          for i, ch in enumerate(raw):
-              if ch == "{":
-                  stack.append("{")
-              elif ch == "}":
-                  if stack:
-                      stack.pop()
-                  if not stack:
-                      end = i + 1
-                      break
-
-          clean = raw[:end]
-
-          data = json.loads(clean)
-
-          # -------- STEP 2: SAVE IN COMPACT SUBJECT FORMAT --------
           def save_json(file, data):
               with open(file, "w", encoding="utf-8") as f:
                   f.write("{\n")
@@ -64,14 +43,18 @@ jobs:
 
                           subjects = student.pop("subjects", [])
 
-                          # 🔥 compact subjects (ONE LINE EACH OBJECT)
-                          subjects_lines = []
-                          for sub in subjects:
-                              subjects_lines.append(json.dumps(sub, ensure_ascii=False, separators=(",", ":")))
+                          # Convert subjects → one-line objects
+                          subjects_lines = [
+                              json.dumps(s, ensure_ascii=False, separators=(",", ":"))
+                              for s in subjects
+                          ]
 
-                          # student basic
+                          # Convert student JSON WITHOUT closing }
                           student_json = json.dumps(student, ensure_ascii=False, indent=6)
                           lines = student_json.splitlines()
+
+                          # REMOVE last closing brace
+                          lines = lines[:-1]
 
                           for i, line in enumerate(lines):
                               if i == 0:
@@ -79,13 +62,14 @@ jobs:
                               else:
                                   f.write(f'    {line}\n')
 
-                          # 🔥 subjects block EXACT like your scraper
+                          # ✅ ADD subjects INSIDE object
                           f.write(f'      ,"subjects": [\n')
                           for si, s in enumerate(subjects_lines):
                               comma = "," if si < len(subjects_lines) - 1 else ""
                               f.write(f'        {s}{comma}\n')
                           f.write("      ]\n")
 
+                          # CLOSE student properly
                           f.write("    }")
 
                           if rn_i < len(rn_keys) - 1:
@@ -102,13 +86,14 @@ jobs:
 
           save_json(FILE_PATH, data)
 
-          print("✅ PERFECT FORMAT DONE")
+          print("✅ PERFECT STRUCTURE FIXED")
           EOF
 
-      - name: Commit changes
+      - name: Commit
         run: |
           git config --global user.name "Manish"
           git config --global user.email "you@example.com"
+
           git add .
-          git commit -m "Fix JSON to scraper format" || echo "No changes"
+          git commit -m "Fix JSON structure correctly" || echo "No changes"
           git push
